@@ -617,8 +617,11 @@ impl EvolveApp {
         ui.painter().rect_filled(rect, 0.0, Color32::BLACK);
         let embedded = !self.detached && self.session.as_ref().is_some_and(|s| s.mpv.is_some());
 
+        // egui ne peut rien dessiner par-dessus la fenêtre X11 de mpv : un menu ouvert
+        // (profil, qualité…) serait caché. On masque la vidéo le temps du choix (le son continue).
+        let menu_open = egui::Popup::is_any_open(ui.ctx());
         if let Some(surface) = &mut self.surface {
-            let result = if embedded {
+            let result = if embedded && !menu_open {
                 // egui compte en « points », X11 en pixels réels (différents si l'écran est zoomé).
                 let ppp = ui.ctx().pixels_per_point();
                 let px = |v: f32| (v * ppp).round();
