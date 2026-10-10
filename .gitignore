@@ -15,6 +15,9 @@ credentials*
 # Configuration locale (la config réelle vit dans ~/.config, pas dans le dépôt)
 config.local.*
 
+# Icône : photo de profil d'un streamer, usage personnel uniquement (droits de l'auteur)
+assets/icon.png
+
 # Éditeurs / système
 .vscode/
 .idea/
