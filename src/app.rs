@@ -1,4 +1,4 @@
-//! Fenêtre principale : contrôles en haut, vidéo au centre, chat (étape 2) à droite.
+//! Fenêtre principale : contrôles en haut, vidéo au centre, chat à droite.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,6 +10,7 @@ use eframe::egui::{self, Align2, Color32, FontId, Key, RichText};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use serde_json::{Value, json};
 
+use crate::chat_column::ChatColumn;
 use crate::config::{Config, VideoOutput};
 use crate::mpv::{self, Mpv, MpvEvent, Output, Placement};
 use crate::streamlink::{self, Server, ServerEvent};
@@ -87,6 +88,8 @@ pub struct EvolveApp {
     detached: bool,
     fullscreen: bool,
     paused: bool,
+
+    chat: ChatColumn,
 }
 
 impl EvolveApp {
@@ -112,7 +115,14 @@ impl EvolveApp {
             ctx.request_repaint();
         });
 
+        let chat = ChatColumn::new(
+            &cc.egui_ctx,
+            &config.channel,
+            config.twitch_client_id.clone(),
+        );
+
         EvolveApp {
+            chat,
             ctx: cc.egui_ctx.clone(),
             tx,
             rx,
@@ -562,7 +572,7 @@ impl EvolveApp {
                 let pause = if self.paused { " · en pause" } else { "" };
                 ui.colored_label(
                     Color32::from_rgb(235, 70, 70),
-                    format!("● En direct · {quality}{output}{pause}"),
+                    format!("En direct · {quality}{output}{pause}"),
                 )
             }
             Status::Error(e) => {
@@ -657,6 +667,7 @@ impl eframe::App for EvolveApp {
             self.handle_event(event);
         }
         self.poll_processes();
+        self.chat.logic();
         if self.session.is_some() {
             // Revérifie l'état des processus deux fois par seconde.
             ctx.request_repaint_after(Duration::from_millis(500));
@@ -672,11 +683,7 @@ impl eframe::App for EvolveApp {
                 .resizable(true)
                 .default_size(340.0)
                 .min_size(220.0)
-                .show(ui, |ui| {
-                    ui.add_space(8.0);
-                    ui.heading("Chat");
-                    ui.label(RichText::new("Le chat arrivera à l'étape 2.").weak());
-                });
+                .show(ui, |ui| self.chat.ui(ui));
         }
         egui::CentralPanel::no_frame().show(ui, |ui| self.video_ui(ui));
     }

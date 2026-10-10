@@ -28,6 +28,9 @@ pub struct Config {
     pub default_profile: String,
     pub profiles: Vec<Profile>,
     pub player: Player,
+    /// Identifiant de l'application enregistrée sur dev.twitch.tv (type « Public »).
+    /// Ce n'est pas un secret : Twitch le voit à chaque requête.
+    pub twitch_client_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -89,6 +92,7 @@ impl Default for Config {
                 },
             ],
             player: Player::default(),
+            twitch_client_id: None,
         }
     }
 }
@@ -187,6 +191,11 @@ impl Config {
                 "default_profile « {} » ne correspond à aucun profil",
                 self.default_profile
             ));
+        }
+        if let Some(id) = &self.twitch_client_id
+            && (!(20..=64).contains(&id.len()) || !id.bytes().all(|b| b.is_ascii_alphanumeric()))
+        {
+            return Err(format!("twitch_client_id invalide : « {id} »"));
         }
         if self.player.volume > 100 {
             return Err("le volume doit être compris entre 0 et 100".into());

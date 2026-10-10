@@ -3,8 +3,16 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod auth;
+mod chat;
+mod chat_column;
+mod chat_panel;
 mod config;
+mod helix;
+mod http;
 mod icon;
+mod images;
+mod irc;
 mod mpv;
 mod network;
 mod paths;

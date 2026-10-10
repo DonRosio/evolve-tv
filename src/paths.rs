@@ -32,6 +32,11 @@ pub fn data_dir() -> Option<PathBuf> {
     xdg_dir("XDG_DATA_HOME", ".local/share")
 }
 
+/// `~/.cache/evolve-tv` : fichiers re-téléchargeables (images des emotes et badges).
+pub fn cache_dir() -> Option<PathBuf> {
+    xdg_dir("XDG_CACHE_HOME", ".cache")
+}
+
 /// `/run/user/<uid>/evolve-tv` : fichiers temporaires (socket de mpv).
 /// Ce dossier système est privé à l'utilisateur et vidé à la déconnexion.
 pub fn runtime_dir() -> Option<PathBuf> {
