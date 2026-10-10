@@ -116,12 +116,7 @@ impl EvolveApp {
             ctx.request_repaint();
         });
 
-        let chat = ChatColumn::new(
-            &cc.egui_ctx,
-            &config.channel,
-            config.twitch_client_id.clone(),
-            config.animated_emotes,
-        );
+        let chat = ChatColumn::new(&cc.egui_ctx, &config);
 
         EvolveApp {
             chat,
@@ -673,6 +668,12 @@ impl eframe::App for EvolveApp {
         }
         self.poll_processes();
         self.chat.logic();
+        if let Some((saved_messages, favorites)) = self.chat.take_shortcuts_change() {
+            self.config.saved_messages = saved_messages;
+            self.config.favorite_emotes = favorites;
+            self.config_dirty = true;
+            self.save_config();
+        }
         if self.session.is_some() {
             // Revérifie l'état des processus deux fois par seconde.
             ctx.request_repaint_after(Duration::from_millis(500));

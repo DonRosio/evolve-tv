@@ -42,6 +42,19 @@ Dans la zone de saisie du chat :
 | `@` + Tab | Compléter un pseudo parmi les personnes actives dans le chat |
 | Entrée | Envoyer |
 
+Au survol d'un message : **Copier** et **Répondre** (vraie réponse Twitch, reliée au
+message d'origine). Les liens s'ouvrent après confirmation (le domaine réel est affiché).
+
+### Raccourcis (barre sous la saisie)
+
+- **Messages enregistrés** : un clic envoie le message. Clic droit : l'insérer dans la
+  saisie ou supprimer le bouton. « + » enregistre le texte de la saisie comme bouton.
+- **Emotes favorites** : clic = insérer dans la saisie ; clic droit ou Ctrl+clic = envoyer.
+- **★ Emotes** : parcourir toutes les emotes (recherche) ; un clic ajoute ou retire une
+  favorite, un clic droit l'insère.
+- Un message identique au précédent (moins de 30 s) reçoit un caractère invisible une
+  fois sur deux, sinon Twitch le refuserait ; mode lent et limites d'envoi respectés.
+
 Les emotes 7TV, BTTV et FFZ de la chaîne sont rechargées à chaque connexion au chat,
 toutes les 30 minutes, ou avec le bouton « Actualiser les emotes ».
 
@@ -94,11 +107,16 @@ chaque champ.
 | `profiles[].max_quality` | Qualité maximale : la meilleure qualité disponible **sans la dépasser** est choisie (`480p` → 480p30, sinon 360p…). Exemples : `480p`, `720p60`, `1080p60`. |
 | `profiles[].wifi_networks` | Noms (SSID) des réseaux Wi-Fi qui activent ce profil. Le bouton « Associer ce réseau » en bas de la fenêtre les remplit. |
 | `twitch_client_id` | ID client de ton application Twitch (type Public). Ce n'est pas un secret. `null` : chat en lecture seule. |
+| `saved_messages` | Boutons de messages : `[{ "label": "Join", "text": "!join" }]` (`label` facultatif). |
+| `favorite_emotes` | Noms des emotes favorites, dans l'ordre d'affichage. |
 | `animated_emotes` | `true` : emotes animées ; `false` : images fixes (moins de CPU, utile sur batterie). |
 | `player.volume` | Volume 0–100, mémorisé automatiquement. |
 | `player.video_output` | `auto` (Xv jusqu'à 480p, GPU au-dessus), `xv` (le plus léger en RAM, mais décodage par le processeur) ou `gpu` (le moins de CPU). |
 | `player.hardware_decoding` | En sortie GPU : décodage par la carte graphique. |
 | `player.streamlink_path`, `player.mpv_path` | Chemins imposés des programmes (`null` : recherche automatique). |
+
+L'application réécrit ce fichier quand tu ajoutes un bouton ou une favorite : ferme-la
+avant de modifier le fichier à la main.
 
 Un champ inconnu ou mal orthographié est signalé en bas de la fenêtre ; l'application
 utilise alors la configuration par défaut **sans réécrire** le fichier.

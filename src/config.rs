@@ -33,7 +33,26 @@ pub struct Config {
     pub twitch_client_id: Option<String>,
     /// Emotes animées dans le chat (`false` : images fixes, moins de CPU).
     pub animated_emotes: bool,
+    /// Boutons qui envoient un message en un clic.
+    pub saved_messages: Vec<SavedMessage>,
+    /// Noms des emotes favorites (barre sous la saisie du chat).
+    pub favorite_emotes: Vec<String>,
 }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedMessage {
+    /// Texte du bouton (par défaut : le début du message).
+    #[serde(default)]
+    pub label: Option<String>,
+    pub text: String,
+}
+
+/// Limites (Twitch refuse les messages de plus de 500 caractères).
+pub const MAX_MESSAGE_CHARS: usize = 500;
+const MAX_LABEL_CHARS: usize = 40;
+const MAX_SAVED_MESSAGES: usize = 50;
+const MAX_FAVORITES: usize = 200;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -96,6 +115,17 @@ impl Default for Config {
             player: Player::default(),
             twitch_client_id: None,
             animated_emotes: true,
+            saved_messages: vec![
+                SavedMessage {
+                    label: None,
+                    text: "!join".into(),
+                },
+                SavedMessage {
+                    label: Some("monkeyLick à tous".into()),
+                    text: "monkeyLick à tous monkeyLick à tous monkeyLick à tous".into(),
+                },
+            ],
+            favorite_emotes: Vec::new(),
         }
     }
 }
@@ -203,6 +233,34 @@ impl Config {
         if self.player.volume > 100 {
             return Err("le volume doit être compris entre 0 et 100".into());
         }
+        if self.saved_messages.len() > MAX_SAVED_MESSAGES {
+            return Err(format!(
+                "{MAX_SAVED_MESSAGES} messages enregistrés au maximum"
+            ));
+        }
+        for message in &self.saved_messages {
+            if !is_valid_saved_text(&message.text) {
+                return Err(format!(
+                    "message enregistré invalide (vide, trop long ou caractère de contrôle) : « {} »",
+                    message.text
+                ));
+            }
+            if let Some(label) = &message.label
+                && (label.trim().is_empty() || label.chars().count() > MAX_LABEL_CHARS)
+            {
+                return Err(format!("libellé de bouton invalide : « {label} »"));
+            }
+        }
+        if self.favorite_emotes.len() > MAX_FAVORITES {
+            return Err(format!("{MAX_FAVORITES} emotes favorites au maximum"));
+        }
+        if let Some(name) = self
+            .favorite_emotes
+            .iter()
+            .find(|n| !is_valid_emote_name(n))
+        {
+            return Err(format!("nom d'emote favorite invalide : « {name} »"));
+        }
         Ok(())
     }
 
@@ -223,6 +281,18 @@ impl Config {
     }
 }
 
+/// Texte de message enregistré : non vide, 500 caractères max, sans caractère de contrôle.
+pub fn is_valid_saved_text(text: &str) -> bool {
+    !text.trim().is_empty()
+        && text.chars().count() <= MAX_MESSAGE_CHARS
+        && !text.chars().any(char::is_control)
+}
+
+/// Un nom d'emote est un mot (sans espace), de longueur raisonnable.
+pub fn is_valid_emote_name(name: &str) -> bool {
+    (1..=100).contains(&name.chars().count()) && !name.chars().any(char::is_whitespace)
+}
+
 /// Un nom de chaîne Twitch ne contient que lettres, chiffres et `_` (25 caractères max).
 /// Le vérifier empêche aussi qu'un nom comme `--option` soit interprété par streamlink.
 pub fn is_valid_channel(name: &str) -> bool {
@@ -235,4 +305,37 @@ pub fn is_valid_quality(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_par_defaut_valide_et_relisible() {
+        let config = Config::default();
+        assert!(config.validate().is_ok());
+        let json = serde_json::to_string_pretty(&config).unwrap();
+        let back: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.saved_messages, config.saved_messages);
+        assert_eq!(back.saved_messages[0].text, "!join");
+    }
+
+    #[test]
+    fn raccourcis_invalides_refuses() {
+        let mut config = Config::default();
+        config.saved_messages.push(SavedMessage {
+            label: None,
+            text: "ligne1\nPRIVMSG #autre :injection".into(),
+        });
+        assert!(config.validate().is_err());
+
+        let mut config = Config::default();
+        config.favorite_emotes.push("deux mots".into());
+        assert!(config.validate().is_err());
+
+        // Une config écrite avant l'étape 4 (sans ces champs) reste lisible.
+        let old: Config = serde_json::from_str(r#"{"channel":"somechannel"}"#).unwrap();
+        assert_eq!(old.saved_messages.len(), 2);
+    }
 }

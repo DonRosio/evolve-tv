@@ -10,6 +10,7 @@ mod chat_column;
 mod chat_panel;
 mod config;
 mod emoji;
+mod emote_picker;
 mod emotes;
 mod helix;
 mod http;

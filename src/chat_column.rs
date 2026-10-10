@@ -16,6 +16,7 @@ use crate::auth::{self, Outcome, Poll, Session};
 use crate::browser;
 use crate::chat::{Badge, Chat, ChatEvent, ChatLogin, SharedLogin};
 use crate::chat_panel::ChatPanel;
+use crate::config::{Config, SavedMessage};
 use crate::emotes;
 use crate::helix::{self, BadgeImage};
 use crate::images::ImageCache;
@@ -84,18 +85,19 @@ pub struct ChatColumn {
 }
 
 impl ChatColumn {
-    pub fn new(
-        ctx: &egui::Context,
-        channel: &str,
-        client_id: Option<String>,
-        animate: bool,
-    ) -> ChatColumn {
+    pub fn new(ctx: &egui::Context, config: &Config) -> ChatColumn {
         let (tx, rx) = mpsc::channel();
+        let client_id = config.twitch_client_id.clone();
+        let mut panel = ChatPanel::new(config.animated_emotes);
+        panel.set_shortcuts(
+            config.saved_messages.clone(),
+            config.favorite_emotes.clone(),
+        );
         let mut column = ChatColumn {
             ctx: ctx.clone(),
             tx,
             rx,
-            channel: channel.to_lowercase(),
+            channel: config.channel.to_lowercase(),
             auth: if client_id.is_some() {
                 AuthState::Checking
             } else {
@@ -110,7 +112,7 @@ impl ChatColumn {
             room_id: None,
             badges_for: None,
             emotes_loaded: None,
-            panel: ChatPanel::new(animate),
+            panel,
             images: ImageCache::new(ctx),
         };
         match column.client_id.clone() {
@@ -119,6 +121,11 @@ impl ChatColumn {
             None => column.restart_chat(),
         }
         column
+    }
+
+    /// Messages enregistrés et favorites modifiés depuis l'interface (à enregistrer).
+    pub fn take_shortcuts_change(&mut self) -> Option<(Vec<SavedMessage>, Vec<String>)> {
+        self.panel.take_shortcuts_change()
     }
 
     /// Lance `job` dans un thread et renvoie son résultat à l'interface.

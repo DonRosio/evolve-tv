@@ -14,7 +14,9 @@ use eframe::egui::{
 
 use crate::browser;
 use crate::chat::{Badge, ChatMessage, ClearTarget, ReplyInfo, ReplyTarget, is_valid_message_id};
+use crate::config::{self, SavedMessage};
 use crate::emoji::{self, Piece};
+use crate::emote_picker::{self, Catalog, Picker};
 use crate::emotes::{Emote, EmoteMap, Provider};
 use crate::helix::BadgeImage;
 use crate::images::{ImageCache, Picture};
@@ -144,6 +146,14 @@ pub struct ChatPanel {
     /// Message auquel on est en train de répondre.
     replying: Option<ReplyTarget>,
     focus_input: bool,
+    /// Boutons de messages enregistrés et emotes favorites (copie de la config).
+    saved_messages: Vec<SavedMessage>,
+    favorites: Vec<String>,
+    /// Vrai quand les raccourcis ont changé et doivent être enregistrés.
+    shortcuts_changed: bool,
+    bar_collapsed: bool,
+    picker: Picker,
+    catalog: Catalog,
     scroll_to_bottom: bool,
     animate: bool,
 }
@@ -172,6 +182,12 @@ impl ChatPanel {
             pending_link: None,
             replying: None,
             focus_input: false,
+            saved_messages: Vec::new(),
+            favorites: Vec::new(),
+            shortcuts_changed: false,
+            bar_collapsed: false,
+            picker: Picker::default(),
+            catalog: Catalog::default(),
             scroll_to_bottom: false,
             animate,
         }
@@ -200,10 +216,27 @@ impl ChatPanel {
                 (name, emote)
             })
             .collect();
+        self.rebuild_catalog();
     }
 
     pub fn set_third_party(&mut self, emotes: EmoteMap) {
         self.third_party = emotes;
+        self.rebuild_catalog();
+    }
+
+    fn rebuild_catalog(&mut self) {
+        self.catalog = Catalog::build(self.user_emotes.values().chain(self.third_party.values()));
+    }
+
+    pub fn set_shortcuts(&mut self, saved_messages: Vec<SavedMessage>, favorites: Vec<String>) {
+        self.saved_messages = saved_messages;
+        self.favorites = favorites;
+    }
+
+    /// Raccourcis modifiés depuis l'interface, à enregistrer dans la config.
+    pub fn take_shortcuts_change(&mut self) -> Option<(Vec<SavedMessage>, Vec<String>)> {
+        std::mem::take(&mut self.shortcuts_changed)
+            .then(|| (self.saved_messages.clone(), self.favorites.clone()))
     }
 
     pub fn set_badges(&mut self, badges: HashMap<Badge, BadgeImage>) {
@@ -400,7 +433,6 @@ impl ChatPanel {
         can_send: bool,
     ) -> Option<Outgoing> {
         let time = ui.input(|i| i.time);
-        let mut out = DrawOutput::default();
         let mut to_send = None;
 
         egui::Panel::bottom("chat_saisie").show(ui, |ui| {
@@ -452,9 +484,34 @@ impl ChatPanel {
                 }
                 response.request_focus();
             }
+            if let Some(outgoing) = self.shortcuts_ui(ui, images, time, can_send) {
+                to_send = Some(outgoing);
+            }
             ui.add_space(4.0);
         });
 
+        if self.picker.open {
+            let action = self
+                .picker
+                .ui(ui, &self.catalog, &self.favorites, images, time);
+            if let Some(action) = action {
+                self.apply_picker(action);
+            }
+        } else {
+            self.messages_ui(ui, images, time, can_send);
+        }
+        to_send
+    }
+
+    /// Liste des messages (seules les lignes visibles sont dessinées).
+    fn messages_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        images: &mut ImageCache,
+        time: f64,
+        can_send: bool,
+    ) {
+        let mut out = DrawOutput::default();
         let scroll_to_bottom = std::mem::take(&mut self.scroll_to_bottom);
         let area = egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -515,7 +572,160 @@ impl ChatPanel {
                 self.scroll_to_bottom = true;
             }
         }
-        to_send
+    }
+
+    /// Barre sous la saisie : messages enregistrés et emotes favorites.
+    fn shortcuts_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        images: &mut ImageCache,
+        time: f64,
+        can_send: bool,
+    ) -> Option<Outgoing> {
+        let mut outgoing = None;
+        let mut insert: Option<String> = None;
+        let mut remove: Option<usize> = None;
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            let arrow = if self.bar_collapsed { "▸" } else { "▾" };
+            if ui
+                .small_button(arrow)
+                .on_hover_text("Afficher / masquer les raccourcis")
+                .clicked()
+            {
+                self.bar_collapsed = !self.bar_collapsed;
+            }
+            if self.bar_collapsed {
+                ui.label(RichText::new("Raccourcis").weak());
+                return;
+            }
+            for (i, saved) in self.saved_messages.iter().enumerate() {
+                let label = saved
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| truncate(&saved.text, 20));
+                let response = ui
+                    .add_enabled(can_send, egui::Button::new(label))
+                    .on_hover_text(format!("{}\nClic droit : insérer ou supprimer", saved.text));
+                if response.clicked() {
+                    outgoing = Some(Outgoing {
+                        text: saved.text.clone(),
+                        reply_to: None,
+                    });
+                }
+                response.context_menu(|ui| {
+                    if ui.button("Insérer dans la saisie").clicked() {
+                        insert = Some(saved.text.clone());
+                        ui.close();
+                    }
+                    if ui.button("Supprimer ce bouton").clicked() {
+                        remove = Some(i);
+                        ui.close();
+                    }
+                });
+            }
+            let draft = self.input.trim();
+            let can_save = config::is_valid_saved_text(draft) && self.saved_messages.len() < 50;
+            if ui
+                .add_enabled(can_save, egui::Button::new("+"))
+                .on_hover_text("Enregistrer le texte de la saisie comme bouton")
+                .clicked()
+            {
+                self.saved_messages.push(SavedMessage {
+                    label: None,
+                    text: draft.to_owned(),
+                });
+                self.shortcuts_changed = true;
+            }
+        });
+
+        if !self.bar_collapsed {
+            ui.horizontal_wrapped(|ui| {
+                for name in &self.favorites {
+                    let picture = self.emote_named(name).and_then(|e| images.get(&e.url));
+                    let response = match picture {
+                        Some(picture) => {
+                            let frame = picture.frame_at(time, false);
+                            let size = frame.size * (24.0 / frame.size.y.max(1.0));
+                            let (rect, response) =
+                                ui.allocate_exact_size(size + egui::vec2(4.0, 4.0), Sense::click());
+                            if response.hovered() {
+                                ui.painter().rect_filled(rect, 4.0, EMOTE_HOVER_BG);
+                            }
+                            let image_rect = Rect::from_center_size(rect.center(), size);
+                            ui.painter()
+                                .image(frame.texture, image_rect, frame.uv, Color32::WHITE);
+                            response
+                        }
+                        // Emote introuvable (pas encore chargée, ou retirée de la chaîne).
+                        None => ui.add(egui::Button::new(name.as_str()).small()),
+                    };
+                    let response = response.on_hover_text(format!(
+                        "{name}\nClic : insérer · clic droit ou Ctrl+clic : envoyer"
+                    ));
+                    let ctrl = ui.input(|i| i.modifiers.command);
+                    let send = response.secondary_clicked() || (response.clicked() && ctrl);
+                    if send && can_send {
+                        outgoing = Some(Outgoing {
+                            text: name.clone(),
+                            reply_to: None,
+                        });
+                    } else if response.clicked() {
+                        insert = Some(name.clone());
+                    }
+                }
+                let label = if self.picker.open {
+                    "Retour au chat"
+                } else {
+                    "★ Emotes"
+                };
+                if ui
+                    .small_button(label)
+                    .on_hover_text("Parcourir toutes les emotes et choisir tes favorites")
+                    .clicked()
+                {
+                    self.picker.open = !self.picker.open;
+                }
+            });
+        }
+
+        if let Some(i) = remove {
+            self.saved_messages.remove(i);
+            self.shortcuts_changed = true;
+        }
+        if let Some(text) = insert {
+            self.insert_text(&text);
+        }
+        if outgoing.is_some() {
+            self.scroll_to_bottom = true;
+        }
+        outgoing
+    }
+
+    /// Ajoute du texte à la saisie (séparé par un espace) et y place le curseur.
+    fn insert_text(&mut self, text: &str) {
+        if !self.input.is_empty() && !self.input.ends_with(' ') {
+            self.input.push(' ');
+        }
+        self.input.push_str(text);
+        self.input.push(' ');
+        self.focus_input = true;
+    }
+
+    fn apply_picker(&mut self, action: emote_picker::Action) {
+        match action {
+            emote_picker::Action::ToggleFavorite(name) => {
+                match self.favorites.iter().position(|n| *n == name) {
+                    Some(i) => {
+                        self.favorites.remove(i);
+                    }
+                    None if self.favorites.len() < 200 => self.favorites.push(name),
+                    None => {}
+                }
+                self.shortcuts_changed = true;
+            }
+            emote_picker::Action::Insert(name) => self.insert_text(&name),
+        }
     }
 
     /// Bandeau « Réponse à @pseudo » au-dessus de la saisie.
