@@ -1,0 +1,23 @@
+# Build Rust
+/target
+
+# Secrets : ne JAMAIS committer de jeton ni de clé
+.env
+.env.*
+*.token
+*.secret
+*.pem
+*.key
+secrets/
+token*
+credentials*
+
+# Configuration locale (la config réelle vit dans ~/.config, pas dans le dépôt)
+config.local.*
+
+# Éditeurs / système
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

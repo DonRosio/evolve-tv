@@ -1,0 +1,4 @@
+# Fige la version du compilateur : le projet compile toujours de la même façon.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]
