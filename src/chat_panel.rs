@@ -10,6 +10,7 @@ use eframe::egui::{self, Color32, Key, Modifiers, Rect, RichText, Sense, Vec2};
 
 use crate::browser;
 use crate::chat::{Badge, ChatMessage, ClearTarget};
+use crate::emoji::{self, Piece};
 use crate::emotes::{Emote, EmoteMap, Provider};
 use crate::helix::BadgeImage;
 use crate::images::{ImageCache, Picture};
@@ -19,6 +20,8 @@ const MAX_LINES: usize = 300;
 const MAX_CHATTERS: usize = 300;
 const EMOTE_HEIGHT: f32 = 28.0;
 const BADGE_SIZE: f32 = 18.0;
+/// Les emojis sont affichés à la taille du texte.
+const EMOJI_SIZE: f32 = 18.0;
 const SUGGESTION_HEIGHT: f32 = 20.0;
 /// Couleur des liens (violet, comme sur Twitch).
 const LINK_COLOR: Color32 = Color32::from_rgb(169, 112, 255);
@@ -50,6 +53,11 @@ const DEFAULT_COLORS: [[u8; 3]; 15] = [
 enum Segment {
     Text(String),
     Link(String),
+    /// Emoji affiché en couleur (image Twemoji).
+    Emoji {
+        text: String,
+        url: String,
+    },
     Emote {
         name: String,
         url: String,
@@ -578,6 +586,33 @@ impl ChatPanel {
                                 ui.add(egui::Label::new(rich).wrap_mode(wrap_mode(word)));
                             }
                         }
+                        Segment::Emoji { text, url } => {
+                            last_emote = None;
+                            match images.get(url) {
+                                Some(picture) => {
+                                    let frame = picture.frame_at(time, false);
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        Vec2::splat(EMOJI_SIZE),
+                                        Sense::hover(),
+                                    );
+                                    if ui.is_rect_visible(rect) {
+                                        ui.painter().image(
+                                            frame.texture,
+                                            rect,
+                                            frame.uv,
+                                            Color32::WHITE,
+                                        );
+                                    }
+                                }
+                                // En chargement, ou inconnu de Twemoji : le caractère en texte.
+                                None => {
+                                    ui.add(
+                                        egui::Label::new(text.as_str())
+                                            .wrap_mode(egui::TextWrapMode::Extend),
+                                    );
+                                }
+                            }
+                        }
                         Segment::Link(url) => {
                             last_emote = None;
                             let rich = RichText::new(url).color(LINK_COLOR).underline();
@@ -745,7 +780,17 @@ fn push_words(segments: &mut Vec<Segment>, text: &str, lookup: &dyn Fn(&str) -> 
                     provider: emote.provider,
                 });
             }
-            None => append_text(segments, word),
+            None => {
+                for piece in emoji::split(word) {
+                    match piece {
+                        Piece::Text(text) => append_text(segments, text),
+                        Piece::Emoji(cluster) => segments.push(Segment::Emoji {
+                            text: cluster.to_owned(),
+                            url: emoji::twemoji_url(cluster),
+                        }),
+                    }
+                }
+            }
         }
     }
 }

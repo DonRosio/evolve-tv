@@ -115,8 +115,8 @@ utilise alors la configuration par défaut **sans réécrire** le fichier.
 - Chat chiffré (TLS, bibliothèque rustls en pur Rust) ; messages sortants nettoyés
   (pas de retour à la ligne : impossible d'injecter une commande IRC).
 - Limites d'envoi de Twitch respectées (20 messages / 30 s, mode lent).
-- Images (emotes, badges) téléchargées uniquement depuis les CDN officiels de Twitch,
-  7TV, BTTV et FFZ (adresses reconstruites à partir des identifiants, jamais reprises
+- Images (emotes, badges, emojis) téléchargées uniquement depuis les CDN officiels de
+  Twitch, 7TV, BTTV, FFZ et Twemoji (jsDelivr, version figée) (adresses reconstruites à partir des identifiants, jamais reprises
   telles quelles) ; formats PNG, GIF et WebP décodés en pur Rust ; taille, dimensions
   et nombre de frames limités ; cache dans `~/.cache/evolve-tv` (droits `0700`).
 - Socket IPC de mpv dans `$XDG_RUNTIME_DIR/evolve-tv` (droits `0700`).
@@ -130,3 +130,8 @@ utilise alors la configuration par défaut **sans réécrire** le fichier.
 - Si l'application est tuée brutalement (`kill -9`), streamlink reste en attente en
   arrière-plan : il ne télécharge rien mais occupe ~47 Mo. Pour le fermer :
   `pkill -f 'streamlink --no-config'`. (Une fermeture normale arrête tout.)
+
+## Crédits
+
+Emojis : [Twemoji](https://github.com/jdecked/twemoji), © Twitter, Inc et contributeurs,
+licence [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).

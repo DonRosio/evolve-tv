@@ -24,7 +24,8 @@ use image::{AnimationDecoder, DynamicImage, ImageDecoder, ImageFormat, Limits, R
 use crate::{http, paths};
 
 /// Sites autorisés : on ne télécharge jamais une image ailleurs.
-const ALLOWED_PREFIXES: [&str; 4] = [
+const ALLOWED_PREFIXES: [&str; 5] = [
+    crate::emoji::TWEMOJI_BASE,
     "https://static-cdn.jtvnw.net/",
     "https://cdn.7tv.app/emote/",
     "https://cdn.betterttv.net/emote/",
