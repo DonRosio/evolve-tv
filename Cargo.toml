@@ -1,0 +1,13 @@
+[package]
+name = "evolve-tv"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+# Profil de compilation optimisé pour un binaire petit et économe en RAM.
+[profile.release]
+opt-level = 3       # optimisation maximale de la vitesse
+lto = true          # optimisation sur l'ensemble du programme (binaire plus petit)
+codegen-units = 1   # compilation plus lente mais code plus compact
+strip = true        # retire les symboles de débogage du binaire final
