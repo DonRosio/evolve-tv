@@ -99,6 +99,7 @@ impl EvolveApp {
         config_error: Option<String>,
     ) -> Self {
         let (tx, rx) = mpsc::channel();
+        install_fallback_font(&cc.egui_ctx);
 
         let (surface, embed_error) = match create_surface(cc) {
             Ok(surface) => (Some(surface), None),
@@ -696,6 +697,36 @@ impl eframe::App for EvolveApp {
         self.session = None;
         self.save_config();
     }
+}
+
+/// Police système utilisée en secours pour les caractères absents de la police
+/// d'egui : braille (art ASCII du chat), flèches, symboles…
+const FALLBACK_FONT: &str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+
+fn install_fallback_font(ctx: &egui::Context) {
+    // Taille plafonnée : on ne charge pas en mémoire un fichier anormal.
+    let bytes = match fs::metadata(FALLBACK_FONT) {
+        Ok(meta) if meta.len() <= 4 * 1024 * 1024 => fs::read(FALLBACK_FONT).ok(),
+        _ => None,
+    };
+    let Some(bytes) = bytes else {
+        eprintln!("Police de secours absente ({FALLBACK_FONT}) : l'art ASCII peut mal s'afficher.");
+        return;
+    };
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "dejavu".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+    );
+    // En dernier : elle ne sert que si les autres polices n'ont pas le caractère.
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts
+            .families
+            .entry(family)
+            .or_default()
+            .push("dejavu".to_owned());
+    }
+    ctx.set_fonts(fonts);
 }
 
 /// Crée la fenêtre X11 enfant qui accueillera la vidéo, dans la fenêtre de l'application.

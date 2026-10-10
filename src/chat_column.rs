@@ -430,10 +430,10 @@ impl ChatColumn {
         }
 
         let can_send = matches!(self.auth, AuthState::LoggedIn(_));
-        if let Some(text) = self.panel.ui(ui, &mut self.images, can_send)
+        if let Some(outgoing) = self.panel.ui(ui, &mut self.images, can_send)
             && let Some((_, chat)) = &self.chat
         {
-            chat.send(&text);
+            chat.send(&outgoing.text, outgoing.reply_to);
         }
     }
 

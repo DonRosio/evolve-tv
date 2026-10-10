@@ -1,15 +1,19 @@
 //! Panneau du chat : messages avec badges et emotes (animées, zero-width),
-//! défilement, zone de saisie avec autocomplétion (Tab).
+//! défilement, actions au survol (copier, répondre), zone de saisie avec
+//! autocomplétion (Tab).
 
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use eframe::egui::text::{CCursor, CCursorRange};
-use eframe::egui::{self, Color32, Key, Modifiers, Rect, RichText, Sense, Vec2};
+use eframe::egui::{
+    self, Color32, FontId, Key, Modifiers, Pos2, Rect, RichText, Sense, Shape, Stroke, Vec2, pos2,
+    vec2,
+};
 
 use crate::browser;
-use crate::chat::{Badge, ChatMessage, ClearTarget};
+use crate::chat::{Badge, ChatMessage, ClearTarget, ReplyInfo, ReplyTarget, is_valid_message_id};
 use crate::emoji::{self, Piece};
 use crate::emotes::{Emote, EmoteMap, Provider};
 use crate::helix::BadgeImage;
@@ -23,8 +27,15 @@ const BADGE_SIZE: f32 = 18.0;
 /// Les emojis sont affichés à la taille du texte.
 const EMOJI_SIZE: f32 = 18.0;
 const SUGGESTION_HEIGHT: f32 = 20.0;
+/// Texte des messages : presque blanc, bien lisible sur le fond sombre.
+const TEXT_COLOR: Color32 = Color32::from_gray(230);
+/// Fond d'un message survolé, et d'une emote survolée (un peu plus clair).
+const HOVER_BG: Color32 = Color32::from_gray(45);
+const EMOTE_HOVER_BG: Color32 = Color32::from_gray(80);
 /// Couleur des liens (violet, comme sur Twitch).
 const LINK_COLOR: Color32 = Color32::from_rgb(169, 112, 255);
+/// Premier message d'une personne : rose, comme sur Twitch.
+const FIRST_COLOR: Color32 = Color32::from_rgb(255, 117, 196);
 /// Au-delà de cette longueur, un mot peut être coupé en fin de ligne.
 const LONG_WORD: usize = 30;
 /// Les animations sont redessinées au plus 30 fois par seconde.
@@ -74,13 +85,22 @@ enum LineKind {
         segments: Vec<Segment>,
         action: bool,
         mention: bool,
+        first: bool,
+        /// Art ASCII (caractères braille) : une « ligne » de dessin par rangée.
+        art: bool,
+        reply: Option<ReplyInfo>,
     },
     System(String),
 }
 
 struct Line {
+    /// Numéro unique de la ligne (identifiant stable pour les boutons au survol).
+    seq: u64,
     id: String,
     login: String,
+    display_name: String,
+    /// Texte brut, pour « Copier » et « Répondre ».
+    text: String,
     kind: LineKind,
     deleted: bool,
     /// Hauteur mesurée au dernier affichage, et largeur correspondante : permet de
@@ -100,8 +120,15 @@ struct Completion {
     applied: String,
 }
 
+/// Message à envoyer.
+pub struct Outgoing {
+    pub text: String,
+    pub reply_to: Option<ReplyTarget>,
+}
+
 pub struct ChatPanel {
     lines: VecDeque<Line>,
+    next_seq: u64,
     input: String,
     my_login: Option<String>,
     /// Emotes Twitch utilisables par moi (pour reconnaître celles de mes messages).
@@ -114,6 +141,9 @@ pub struct ChatPanel {
     completion: Option<Completion>,
     /// Lien cliqué, en attente de confirmation avant ouverture.
     pending_link: Option<String>,
+    /// Message auquel on est en train de répondre.
+    replying: Option<ReplyTarget>,
+    focus_input: bool,
     scroll_to_bottom: bool,
     animate: bool,
 }
@@ -124,12 +154,14 @@ struct DrawOutput {
     /// Délai avant la prochaine frame d'une emote animée visible.
     next_repaint: Option<f64>,
     clicked_link: Option<String>,
+    reply: Option<ReplyTarget>,
 }
 
 impl ChatPanel {
     pub fn new(animate: bool) -> ChatPanel {
         ChatPanel {
             lines: VecDeque::new(),
+            next_seq: 0,
             input: String::new(),
             my_login: None,
             user_emotes: EmoteMap::new(),
@@ -138,6 +170,8 @@ impl ChatPanel {
             chatters: VecDeque::new(),
             completion: None,
             pending_link: None,
+            replying: None,
+            focus_input: false,
             scroll_to_bottom: false,
             animate,
         }
@@ -146,6 +180,7 @@ impl ChatPanel {
     pub fn set_me(&mut self, login: Option<String>) {
         if login.is_none() {
             self.user_emotes.clear();
+            self.replying = None;
         }
         self.my_login = login;
     }
@@ -176,11 +211,23 @@ impl ChatPanel {
     }
 
     pub fn push_system(&mut self, text: impl Into<String>) {
-        self.push(String::new(), String::new(), LineKind::System(text.into()));
+        let text = text.into();
+        self.push(Line {
+            seq: 0,
+            id: String::new(),
+            login: String::new(),
+            display_name: String::new(),
+            text: text.clone(),
+            kind: LineKind::System(text),
+            deleted: false,
+            height: Cell::new(0.0),
+            width: Cell::new(0.0),
+        });
     }
 
     pub fn push_message(&mut self, message: ChatMessage) {
         let own = message.own;
+        let art = is_ascii_art(&message.text);
         // Les emotes 7TV/BTTV/FFZ se reconnaissent par leur nom dans tous les messages.
         // Twitch ne renvoie pas nos propres messages, donc ni la position de leurs
         // emotes Twitch : on les reconnaît aussi par leur nom.
@@ -198,14 +245,27 @@ impl ChatPanel {
             self.remember_chatter(&message.display_name);
         }
         let kind = LineKind::Chat {
-            name: message.display_name,
+            name: message.display_name.clone(),
             color: readable_color(message.color, &message.login),
             badges: message.badges,
             segments,
             action: message.action,
             mention,
+            first: message.first,
+            art,
+            reply: message.reply,
         };
-        self.push(message.id, message.login, kind);
+        self.push(Line {
+            seq: 0,
+            id: message.id,
+            login: message.login,
+            display_name: message.display_name,
+            text: message.text,
+            kind,
+            deleted: false,
+            height: Cell::new(0.0),
+            width: Cell::new(0.0),
+        });
     }
 
     fn remember_chatter(&mut self, name: &str) {
@@ -231,15 +291,10 @@ impl ChatPanel {
         }
     }
 
-    fn push(&mut self, id: String, login: String, kind: LineKind) {
-        self.lines.push_back(Line {
-            id,
-            login,
-            kind,
-            deleted: false,
-            height: Cell::new(0.0),
-            width: Cell::new(0.0),
-        });
+    fn push(&mut self, mut line: Line) {
+        self.next_seq += 1;
+        line.seq = self.next_seq;
+        self.lines.push_back(line);
         while self.lines.len() > MAX_LINES {
             self.lines.pop_front();
         }
@@ -325,6 +380,16 @@ impl ChatPanel {
         true
     }
 
+    /// Prépare une réponse : « @pseudo » au début de la saisie, curseur à la fin.
+    fn start_reply(&mut self, target: ReplyTarget) {
+        let mention = format!("@{} ", target.name);
+        if !self.input.starts_with(&mention) {
+            self.input = format!("{mention}{}", self.input);
+        }
+        self.replying = Some(target);
+        self.focus_input = true;
+    }
+
     // ---------- Affichage ----------
 
     /// Dessine le panneau. Renvoie le message à envoyer quand on appuie sur Entrée.
@@ -333,16 +398,21 @@ impl ChatPanel {
         ui: &mut egui::Ui,
         images: &mut ImageCache,
         can_send: bool,
-    ) -> Option<String> {
+    ) -> Option<Outgoing> {
         let time = ui.input(|i| i.time);
         let mut out = DrawOutput::default();
         let mut to_send = None;
 
         egui::Panel::bottom("chat_saisie").show(ui, |ui| {
             ui.add_space(4.0);
+            self.reply_bar_ui(ui);
             self.link_confirmation_ui(ui);
             self.suggestions_ui(ui, images, time);
             let id = egui::Id::new("chat_saisie_texte");
+            if can_send && std::mem::take(&mut self.focus_input) {
+                ui.memory_mut(|m| m.request_focus(id));
+                move_cursor_to_end(ui.ctx(), id, &self.input);
+            }
             if can_send && ui.memory(|m| m.has_focus(id)) {
                 // Tab est intercepté avant le champ de saisie, qui ne le voit donc pas.
                 let back = ui.input_mut(|i| i.consume_key(Modifiers::SHIFT, Key::Tab));
@@ -373,7 +443,10 @@ impl ChatPanel {
             }
             if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                 if !self.input.trim().is_empty() {
-                    to_send = Some(std::mem::take(&mut self.input));
+                    to_send = Some(Outgoing {
+                        text: std::mem::take(&mut self.input),
+                        reply_to: self.replying.take(),
+                    });
                     self.completion = None;
                     self.scroll_to_bottom = true;
                 }
@@ -388,6 +461,7 @@ impl ChatPanel {
             // Reste collé en bas… sauf si on remonte dans l'historique.
             .stick_to_bottom(true);
         let output = area.show_viewport(ui, |ui, viewport| {
+            ui.visuals_mut().override_text_color = Some(TEXT_COLOR);
             ui.spacing_mut().item_spacing.y = 3.0;
             let spacing = ui.spacing().item_spacing.y;
             let width = ui.available_width();
@@ -401,7 +475,7 @@ impl ChatPanel {
                     // Ligne hors écran : un simple espace de la bonne hauteur.
                     ui.allocate_space(egui::vec2(width, height));
                 } else {
-                    let rect = self.line_ui(ui, line, images, time, &mut out);
+                    let rect = self.line_ui(ui, line, images, time, can_send, &mut out);
                     line.height.set(rect.height());
                     line.width.set(width);
                 }
@@ -415,6 +489,9 @@ impl ChatPanel {
         });
         if let Some(url) = out.clicked_link.take() {
             self.pending_link = Some(url);
+        }
+        if let Some(target) = out.reply.take() {
+            self.start_reply(target);
         }
 
         // Redessine juste à temps pour la prochaine frame des emotes animées visibles.
@@ -441,6 +518,30 @@ impl ChatPanel {
         to_send
     }
 
+    /// Bandeau « Réponse à @pseudo » au-dessus de la saisie.
+    fn reply_bar_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(target) = &self.replying else {
+            return;
+        };
+        let mut cancel = false;
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "Réponse à @{} : {}",
+                    target.name,
+                    truncate(&target.body, 60)
+                ))
+                .small(),
+            );
+            if ui.small_button("Annuler").clicked() {
+                cancel = true;
+            }
+        });
+        if cancel {
+            self.replying = None;
+        }
+    }
+
     /// Barre « Ouvrir ce lien ? » : montre le vrai domaine avant d'ouvrir le navigateur.
     fn link_confirmation_ui(&mut self, ui: &mut egui::Ui) {
         let Some(url) = self.pending_link.clone() else {
@@ -457,8 +558,7 @@ impl ChatPanel {
                 );
                 ui.label("?");
             });
-            let shown: String = url.chars().take(120).collect();
-            ui.label(RichText::new(shown).small().weak());
+            ui.label(RichText::new(truncate(&url, 120)).small().weak());
             ui.horizontal(|ui| {
                 if ui.button("Ouvrir").clicked() {
                     browser::open(&url);
@@ -523,161 +623,274 @@ impl ChatPanel {
         line: &Line,
         images: &mut ImageCache,
         time: f64,
+        can_reply: bool,
         out: &mut DrawOutput,
     ) -> Rect {
-        let (name, color, badges, segments, action, mention) = match &line.kind {
-            LineKind::System(text) => {
-                return ui
-                    .label(RichText::new(text).italics().color(Color32::GRAY))
-                    .rect;
-            }
-            LineKind::Chat {
-                name,
-                color,
-                badges,
-                segments,
-                action,
-                mention,
-            } => (name, *color, badges, segments, *action, *mention),
+        let LineKind::Chat {
+            name,
+            color,
+            badges,
+            segments,
+            action,
+            mention,
+            first,
+            art,
+            reply,
+        } = &line.kind
+        else {
+            let LineKind::System(text) = &line.kind else {
+                unreachable!()
+            };
+            return ui
+                .label(RichText::new(text).italics().color(Color32::GRAY))
+                .rect;
         };
+        let (color, action, art) = (*color, *action, *art);
 
+        // Emplacement réservé sous le message : rempli au survol (fond plus clair).
+        let hover_background = ui.painter().add(Shape::Noop);
         let mut frame = egui::Frame::new().inner_margin(2.0);
-        if mention {
+        if *first {
+            frame = frame.fill(FIRST_COLOR.gamma_multiply(0.18));
+        } else if *mention {
             frame = frame.fill(Color32::from_rgba_unmultiplied(220, 50, 50, 45));
         }
-        let response = frame.show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                for badge in badges {
-                    let Some(info) = self.badges.get(badge) else {
-                        continue;
-                    };
-                    if let Some(picture) = images.get(&info.url) {
-                        let frame = picture.frame_at(time, false);
-                        let (rect, response) =
-                            ui.allocate_exact_size(Vec2::splat(BADGE_SIZE), Sense::hover());
-                        ui.painter()
-                            .image(frame.texture, rect, frame.uv, Color32::WHITE);
-                        response.on_hover_text(&info.title);
-                        ui.add_space(3.0);
+        let rect = frame
+            .show(ui, |ui| {
+                if *first {
+                    ui.label(
+                        RichText::new("Premier message")
+                            .small()
+                            .strong()
+                            .color(FIRST_COLOR),
+                    );
+                }
+                if let Some(reply) = reply {
+                    ui.label(
+                        RichText::new(format!(
+                            "En réponse à @{} : {}",
+                            reply.parent_name,
+                            truncate(&reply.parent_body, 80)
+                        ))
+                        .small()
+                        .weak(),
+                    );
+                }
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    for badge in badges {
+                        let Some(info) = self.badges.get(badge) else {
+                            continue;
+                        };
+                        if let Some(picture) = images.get(&info.url) {
+                            let frame = picture.frame_at(time, false);
+                            let (rect, response) =
+                                ui.allocate_exact_size(Vec2::splat(BADGE_SIZE), Sense::hover());
+                            ui.painter()
+                                .image(frame.texture, rect, frame.uv, Color32::WHITE);
+                            response.on_hover_text(&info.title);
+                            ui.add_space(3.0);
+                        }
+                    }
+                    ui.label(RichText::new(name).color(color).strong());
+                    ui.label(if action { " " } else { ": " });
+                    if line.deleted {
+                        ui.label(RichText::new("<message supprimé>").italics().weak());
+                        return;
+                    }
+                    if art {
+                        // Art ASCII : chaque « mot » est une ligne du dessin, collées
+                        // les unes aux autres.
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.end_row();
+                    }
+                    self.segments_ui(ui, segments, color, action, art, images, time, out);
+                });
+            })
+            .response
+            .rect;
+
+        if ui.rect_contains_pointer(rect) {
+            ui.painter()
+                .set(hover_background, Shape::rect_filled(rect, 3.0, HOVER_BG));
+            self.hover_actions_ui(ui, line, rect, can_reply, out);
+        }
+        rect
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn segments_ui(
+        &self,
+        ui: &mut egui::Ui,
+        segments: &[Segment],
+        color: Color32,
+        action: bool,
+        art: bool,
+        images: &mut ImageCache,
+        time: f64,
+        out: &mut DrawOutput,
+    ) {
+        // Dernière emote dessinée : une emote zero-width se pose par-dessus.
+        let mut last_emote: Option<Rect> = None;
+        for segment in segments {
+            match segment {
+                Segment::Text(text) if art => {
+                    for row in text.split(' ').filter(|r| !r.is_empty()) {
+                        ui.add(egui::Label::new(row).wrap_mode(egui::TextWrapMode::Extend));
+                        ui.end_row();
                     }
                 }
-                ui.label(RichText::new(name).color(color).strong());
-                ui.label(if action { " " } else { ": " });
-                if line.deleted {
-                    ui.label(RichText::new("<message supprimé>").italics().weak());
-                    return;
-                }
-                // Dernière emote dessinée : une emote zero-width se pose par-dessus.
-                let mut last_emote: Option<Rect> = None;
-                for segment in segments {
-                    match segment {
-                        Segment::Text(text) => {
-                            if !text.trim().is_empty() {
-                                last_emote = None;
-                            }
-                            // Un mot par étiquette : le retour à la ligne se fait entre
-                            // les mots, comme sur Twitch (seuls les mots très longs sont coupés).
-                            for word in text.split_inclusive(' ') {
-                                let mut rich = RichText::new(word);
-                                if action {
-                                    rich = rich.color(color).italics();
-                                }
-                                ui.add(egui::Label::new(rich).wrap_mode(wrap_mode(word)));
-                            }
+                Segment::Text(text) => {
+                    if !text.trim().is_empty() {
+                        last_emote = None;
+                    }
+                    // Un mot par étiquette : le retour à la ligne se fait entre
+                    // les mots, comme sur Twitch (seuls les mots très longs sont coupés).
+                    for word in text.split_inclusive(' ') {
+                        let mut rich = RichText::new(word);
+                        if action {
+                            rich = rich.color(color).italics();
                         }
-                        Segment::Emoji { text, url } => {
-                            last_emote = None;
-                            match images.get(url) {
-                                Some(picture) => {
-                                    let frame = picture.frame_at(time, false);
-                                    let (rect, _) = ui.allocate_exact_size(
-                                        Vec2::splat(EMOJI_SIZE),
-                                        Sense::hover(),
-                                    );
-                                    if ui.is_rect_visible(rect) {
-                                        ui.painter().image(
-                                            frame.texture,
-                                            rect,
-                                            frame.uv,
-                                            Color32::WHITE,
-                                        );
-                                    }
-                                }
-                                // En chargement, ou inconnu de Twemoji : le caractère en texte.
-                                None => {
-                                    ui.add(
-                                        egui::Label::new(text.as_str())
-                                            .wrap_mode(egui::TextWrapMode::Extend),
-                                    );
-                                }
-                            }
-                        }
-                        Segment::Link(url) => {
-                            last_emote = None;
-                            let rich = RichText::new(url).color(LINK_COLOR).underline();
-                            let response = ui
-                                .add(
-                                    egui::Label::new(rich)
-                                        .wrap_mode(wrap_mode(url))
-                                        .sense(Sense::click()),
-                                )
-                                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                .on_hover_text(format!("Ouvrir {}", browser::domain(url)));
-                            if response.clicked() {
-                                out.clicked_link = Some(url.clone());
-                            }
-                        }
-                        Segment::Emote {
-                            name,
-                            url,
-                            zero_width,
-                            provider,
-                        } => match images.get(url) {
-                            Some(picture) => {
-                                let base = last_emote.filter(|_| *zero_width);
-                                let rect = self.paint_emote(ui, picture, base, time, out);
-                                if base.is_none() {
-                                    ui.interact(
-                                        rect,
-                                        ui.id().with(rect.min.x as i32),
-                                        Sense::hover(),
-                                    )
-                                    .on_hover_text(format!("{name} · {}", provider.label()));
-                                    last_emote = Some(rect);
-                                }
-                            }
-                            // Pas encore chargée : son nom en attendant.
-                            None => {
-                                ui.label(RichText::new(name).weak());
-                                last_emote = None;
-                            }
-                        },
+                        ui.add(egui::Label::new(rich).wrap_mode(wrap_mode(word)));
                     }
                 }
-            });
-        });
-        response.response.rect
+                Segment::Emoji { text, url } => {
+                    last_emote = None;
+                    match images.get(url) {
+                        Some(picture) => {
+                            let frame = picture.frame_at(time, false);
+                            let (rect, _) =
+                                ui.allocate_exact_size(Vec2::splat(EMOJI_SIZE), Sense::hover());
+                            if ui.is_rect_visible(rect) {
+                                ui.painter()
+                                    .image(frame.texture, rect, frame.uv, Color32::WHITE);
+                            }
+                        }
+                        // En chargement, ou inconnu de Twemoji : le caractère en texte.
+                        None => {
+                            ui.add(
+                                egui::Label::new(text.as_str())
+                                    .wrap_mode(egui::TextWrapMode::Extend),
+                            );
+                        }
+                    }
+                }
+                Segment::Link(url) => {
+                    last_emote = None;
+                    let rich = RichText::new(url).color(LINK_COLOR).underline();
+                    let response = ui
+                        .add(
+                            egui::Label::new(rich)
+                                .wrap_mode(wrap_mode(url))
+                                .sense(Sense::click()),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(format!("Ouvrir {}", browser::domain(url)));
+                    if response.clicked() {
+                        out.clicked_link = Some(url.clone());
+                    }
+                }
+                Segment::Emote {
+                    name,
+                    url,
+                    zero_width,
+                    provider,
+                } => match images.get(url) {
+                    Some(picture) => {
+                        let base = last_emote.filter(|_| *zero_width);
+                        let label = (name.as_str(), provider.label());
+                        let rect = self.paint_emote(ui, picture, base, label, time, out);
+                        if base.is_none() {
+                            last_emote = Some(rect);
+                        }
+                    }
+                    // Pas encore chargée : son nom en attendant.
+                    None => {
+                        ui.label(RichText::new(name).weak());
+                        last_emote = None;
+                    }
+                },
+            }
+        }
+    }
+
+    /// Boutons « Copier » et « Répondre » en haut à droite du message survolé.
+    fn hover_actions_ui(
+        &self,
+        ui: &mut egui::Ui,
+        line: &Line,
+        rect: Rect,
+        can_reply: bool,
+        out: &mut DrawOutput,
+    ) {
+        let reply_allowed = can_reply && !line.deleted && is_valid_message_id(&line.id);
+        let size = 20.0;
+        let mut right = rect.right() - 4.0;
+        let mut actions: Vec<(&str, Icon)> = vec![("Copier le message", Icon::Copy)];
+        if reply_allowed {
+            actions.push(("Répondre", Icon::Reply));
+        }
+        for (tooltip, icon) in actions {
+            let button =
+                Rect::from_min_size(pos2(right - size, rect.top() + 2.0), Vec2::splat(size));
+            right -= size + 4.0;
+            let response = ui
+                .interact(
+                    button,
+                    egui::Id::new(("ligne", line.seq, tooltip)),
+                    Sense::click(),
+                )
+                .on_hover_text(tooltip);
+            let background = if response.hovered() {
+                Color32::from_gray(95)
+            } else {
+                Color32::from_gray(65)
+            };
+            ui.painter().rect_filled(button, 4.0, background);
+            paint_icon(ui.painter(), button, icon);
+            if response.clicked() {
+                match icon {
+                    Icon::Copy => ui.ctx().copy_text(line.text.clone()),
+                    Icon::Reply => {
+                        out.reply = Some(ReplyTarget {
+                            id: line.id.clone(),
+                            name: line.display_name.clone(),
+                            body: line.text.clone(),
+                        });
+                    }
+                }
+            }
+        }
     }
 
     /// Dessine une emote (la frame du moment si elle est animée). Avec `overlay_on`,
     /// elle est centrée sur cette zone (emote zero-width) sans prendre de place.
+    /// Au survol : fond plus clair et nom de l'emote affiché au-dessus.
     fn paint_emote(
         &self,
         ui: &mut egui::Ui,
         picture: &Picture,
         overlay_on: Option<Rect>,
+        (name, provider): (&str, &str),
         time: f64,
         out: &mut DrawOutput,
     ) -> Rect {
         let frame = picture.frame_at(time, self.animate);
         let size = frame.size * (EMOTE_HEIGHT / frame.size.y.max(1.0));
-        let rect = match overlay_on {
-            Some(base) => Rect::from_center_size(base.center(), size),
-            None => ui.allocate_exact_size(size, Sense::hover()).0,
+        let (rect, hovered) = match overlay_on {
+            Some(base) => (Rect::from_center_size(base.center(), size), false),
+            None => {
+                let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+                (rect, response.hovered())
+            }
         };
-        // Seules les emotes visibles à l'écran sont animées.
+        // Seules les emotes visibles à l'écran sont dessinées et animées.
         if ui.is_rect_visible(rect) {
+            if hovered {
+                ui.painter()
+                    .rect_filled(rect.expand(2.0), 4.0, EMOTE_HOVER_BG);
+                emote_tooltip(ui, rect, name, provider);
+            }
             ui.painter()
                 .image(frame.texture, rect, frame.uv, Color32::WHITE);
             if let Some(delay) = frame.next_change {
@@ -685,6 +898,94 @@ impl ChatPanel {
             }
         }
         rect
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Icon {
+    Copy,
+    Reply,
+}
+
+/// Petites icônes dessinées à la main (la police intégrée n'en a pas de jolies).
+fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon) {
+    let stroke = Stroke::new(1.5, Color32::WHITE);
+    let c = rect.center();
+    match icon {
+        Icon::Copy => {
+            // Deux feuilles superposées.
+            let back = Rect::from_min_size(c + vec2(-6.0, -6.0), vec2(8.0, 9.0));
+            let front = Rect::from_min_size(c + vec2(-2.0, -3.0), vec2(8.0, 9.0));
+            painter.rect_stroke(back, 1.5, stroke, egui::StrokeKind::Inside);
+            painter.rect_filled(front, 1.5, Color32::from_gray(65));
+            painter.rect_stroke(front, 1.5, stroke, egui::StrokeKind::Inside);
+        }
+        Icon::Reply => {
+            // Flèche de retour : ↩
+            let points: Vec<Pos2> = vec![
+                c + vec2(6.0, 5.0),
+                c + vec2(6.0, 1.0),
+                c + vec2(4.0, -1.0),
+                c + vec2(-5.0, -1.0),
+            ];
+            painter.add(Shape::line(points, stroke));
+            painter.line_segment([c + vec2(-5.0, -1.0), c + vec2(-1.5, -4.5)], stroke);
+            painter.line_segment([c + vec2(-5.0, -1.0), c + vec2(-1.5, 2.5)], stroke);
+        }
+    }
+}
+
+/// Nom de l'emote (et son service) affiché au-dessus d'elle, dans la colonne du chat.
+fn emote_tooltip(ui: &egui::Ui, rect: Rect, name: &str, provider: &str) {
+    let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("survol_emote"));
+    let painter = ui.ctx().layer_painter(layer);
+    let title = painter.layout_no_wrap(name.to_owned(), FontId::proportional(14.0), Color32::WHITE);
+    let subtitle = painter.layout_no_wrap(
+        provider.to_owned(),
+        FontId::proportional(11.0),
+        Color32::from_gray(170),
+    );
+    let width = title.size().x.max(subtitle.size().x);
+    let height = title.size().y + subtitle.size().y;
+    // Au-dessus de l'emote, sans dépasser à gauche de la colonne (la vidéo est là).
+    let left = ui.clip_rect().left() + 2.0;
+    let x = (rect.center().x - width / 2.0).max(left);
+    let top = rect.top() - height - 10.0;
+    let background = Rect::from_min_size(pos2(x, top), vec2(width, height)).expand(5.0);
+    painter.rect_filled(background, 4.0, Color32::from_gray(20));
+    painter.galley(
+        pos2(x + (width - title.size().x) / 2.0, top),
+        title,
+        Color32::WHITE,
+    );
+    painter.galley(
+        pos2(
+            x + (width - subtitle.size().x) / 2.0,
+            top + height - subtitle.size().y,
+        ),
+        subtitle,
+        Color32::from_gray(170),
+    );
+}
+
+/// Message composé surtout de caractères braille (U+2800 à U+28FF) : de l'art ASCII.
+fn is_ascii_art(text: &str) -> bool {
+    let visible = text.chars().filter(|c| !c.is_whitespace()).count();
+    let braille = text
+        .chars()
+        .filter(|c| ('\u{2800}'..='\u{28FF}').contains(c))
+        .count();
+    visible >= 20 && braille * 10 >= visible * 8
+}
+
+/// Coupe un texte trop long (en caractères) et ajoute « … ».
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_owned()
+    } else {
+        let mut cut: String = text.chars().take(max).collect();
+        cut.push('…');
+        cut
     }
 }
 
@@ -939,6 +1240,15 @@ mod tests {
 
         panel.input = "zzz".into();
         assert!(!panel.complete(false));
+    }
+
+    #[test]
+    fn art_ascii() {
+        let art = "⣿⣿⣿⣿⣿⣿⡿⠿⠛⠛⠛⠻⢿⣿⣿⣿ ⣿⣿⣿⣿⠋⠄⠄⠄⠄⠄⠄⠄⠄⠉⣿⣿";
+        assert!(is_ascii_art(art));
+        assert!(!is_ascii_art("salut ⣿ ça va tout le monde ?"));
+        assert_eq!(truncate("abcdef", 3), "abc…");
+        assert_eq!(truncate("abc", 3), "abc");
     }
 
     #[test]

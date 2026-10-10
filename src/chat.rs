@@ -20,6 +20,10 @@ const PORT: u16 = 6697;
 /// Twitch refuse les messages de plus de 500 caractères.
 const MAX_MESSAGE_CHARS: usize = 500;
 const MAX_LINE: usize = 64 * 1024;
+/// Ajouté une fois sur deux à un message identique au précédent (moins de 30 s),
+/// que Twitch refuserait sinon. Même astuce que Chatterino : espace + U+E0000,
+/// un caractère invisible.
+const INVISIBLE_SUFFIX: &str = " \u{E0000}";
 
 /// Identifiants utilisés à chaque (re)connexion. Partagés avec l'application,
 /// qui les met à jour quand le jeton est renouvelé. Volontairement sans `Debug`.
@@ -50,6 +54,24 @@ pub struct ChatMessage {
     pub action: bool,
     /// Envoyé par moi (Twitch ne renvoie pas nos propres messages).
     pub own: bool,
+    /// Premier message de cette personne dans la chaîne.
+    pub first: bool,
+    /// Réponse à un autre message.
+    pub reply: Option<ReplyInfo>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReplyInfo {
+    pub parent_name: String,
+    pub parent_body: String,
+}
+
+/// Message auquel on répond.
+#[derive(Clone, Debug)]
+pub struct ReplyTarget {
+    pub id: String,
+    pub name: String,
+    pub body: String,
 }
 
 pub enum ClearTarget {
@@ -76,7 +98,10 @@ pub enum ChatEvent {
 }
 
 enum Command {
-    Send(String),
+    Send {
+        text: String,
+        reply_to: Option<ReplyTarget>,
+    },
 }
 
 /// Poignée sur le thread du chat. Le détruire arrête la connexion.
@@ -98,8 +123,11 @@ impl Chat {
         Chat { commands, stop }
     }
 
-    pub fn send(&self, text: &str) {
-        let _ = self.commands.send(Command::Send(text.to_owned()));
+    pub fn send(&self, text: &str, reply_to: Option<ReplyTarget>) {
+        let _ = self.commands.send(Command::Send {
+            text: text.to_owned(),
+            reply_to,
+        });
     }
 }
 
@@ -135,7 +163,7 @@ fn run(
         while Instant::now() < deadline && !stop.load(Ordering::Relaxed) {
             // Pendant la coupure, les messages à envoyer sont refusés plutôt que
             // d'être envoyés en retard.
-            while let Ok(Command::Send(_)) = commands.try_recv() {
+            while let Ok(Command::Send { .. }) = commands.try_recv() {
                 on_event(ChatEvent::SendRejected(
                     "chat déconnecté, message non envoyé".into(),
                 ));
@@ -231,6 +259,9 @@ struct SendRules {
     recent: VecDeque<Instant>,
     slow_mode_secs: u64,
     last_sent: Option<Instant>,
+    /// Dernier texte envoyé et ajout (ou non) du suffixe invisible.
+    last_text: Option<String>,
+    suffix_used: bool,
 }
 
 impl SendRules {
@@ -260,10 +291,23 @@ impl SendRules {
         Ok(())
     }
 
-    fn record(&mut self) {
+    /// Faut-il ajouter le suffixe invisible ? Oui si ce texte est identique au
+    /// précédent, envoyé il y a moins de 30 s… et en alternance : le suivant
+    /// identique repartira sans suffixe (il diffère alors du message d'avant).
+    fn needs_suffix(&self, text: &str) -> bool {
+        self.last_text.as_deref() == Some(text)
+            && self
+                .last_sent
+                .is_some_and(|t| t.elapsed() < Duration::from_secs(30))
+            && !self.suffix_used
+    }
+
+    fn record(&mut self, text: &str, suffix_used: bool) {
         let now = Instant::now();
         self.recent.push_back(now);
         self.last_sent = Some(now);
+        self.last_text = Some(text.to_owned());
+        self.suffix_used = suffix_used;
     }
 }
 
@@ -311,8 +355,17 @@ fn session(
             let _ = send_line(&mut stream, &format!("PART #{channel}"));
             return Ok(());
         }
-        while let Ok(Command::Send(text)) = commands.try_recv() {
-            send_message(&mut stream, channel, &text, &mut me, &mut rules, on_event)?;
+        while let Ok(Command::Send { text, reply_to }) = commands.try_recv() {
+            let reply_to = reply_to.as_ref();
+            send_message(
+                &mut stream,
+                channel,
+                &text,
+                reply_to,
+                &mut me,
+                &mut rules,
+                on_event,
+            )?;
         }
 
         match stream.read(&mut buffer) {
@@ -359,6 +412,7 @@ fn send_message(
     stream: &mut Stream,
     channel: &str,
     text: &str,
+    reply_to: Option<&ReplyTarget>,
     me: &mut Me,
     rules: &mut SendRules,
     on_event: &dyn Fn(ChatEvent),
@@ -376,13 +430,25 @@ fn send_message(
         on_event(ChatEvent::SendRejected(reason));
         return Ok(());
     }
-    let (body, action) = match text.strip_prefix("/me ") {
+    let suffix = rules.needs_suffix(&text);
+    let mut content = text.clone();
+    if suffix {
+        content.push_str(INVISIBLE_SUFFIX);
+    }
+    let (body, action) = match content.strip_prefix("/me ") {
         // Format standard des actions IRC (CTCP ACTION).
         Some(action) => (format!("\u{1}ACTION {action}\u{1}"), true),
-        None => (text.clone(), false),
+        None => (content.clone(), false),
     };
-    send_line(stream, &format!("PRIVMSG #{channel} :{body}"))?;
-    rules.record();
+    // Réponse : le tag « reply-parent-msg-id » relie le message à celui d'origine.
+    let reply_tag = match reply_to {
+        Some(target) if is_valid_message_id(&target.id) => {
+            format!("@reply-parent-msg-id={} ", target.id)
+        }
+        _ => String::new(),
+    };
+    send_line(stream, &format!("{reply_tag}PRIVMSG #{channel} :{body}"))?;
+    rules.record(&text, suffix);
     let text = if action {
         text["/me ".len()..].to_owned()
     } else {
@@ -398,6 +464,11 @@ fn send_message(
         emotes: Vec::new(),
         action,
         own: true,
+        first: false,
+        reply: reply_to.map(|target| ReplyInfo {
+            parent_name: target.name.clone(),
+            parent_body: target.body.clone(),
+        }),
     }));
     Ok(())
 }
@@ -536,7 +607,20 @@ fn parse_privmsg(message: &IrcMessage) -> Option<ChatMessage> {
         text,
         action,
         own: false,
+        first: message.tag("first-msg") == "1",
+        reply: (!message.tag("reply-parent-msg-id").is_empty()).then(|| ReplyInfo {
+            parent_name: match message.tag("reply-parent-display-name") {
+                "" => message.tag("reply-parent-user-login").to_owned(),
+                name => name.to_owned(),
+            },
+            parent_body: message.tag("reply-parent-msg-body").to_owned(),
+        }),
     })
+}
+
+/// Identifiant de message Twitch (UUID) : chiffres hexadécimaux et tirets.
+pub fn is_valid_message_id(id: &str) -> bool {
+    (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
 }
 
 /// `"#1E90FF"` → `[30, 144, 255]`
@@ -625,8 +709,35 @@ mod tests {
             ..Default::default()
         };
         assert!(rules.check(false).is_ok());
-        rules.record();
+        rules.record("a", false);
         assert!(rules.check(false).is_err());
         assert!(rules.check(true).is_ok()); // les modérateurs ne sont pas concernés
+    }
+
+    #[test]
+    fn contournement_anti_doublon() {
+        let mut rules = SendRules::default();
+        assert!(!rules.needs_suffix("!join")); // premier envoi : tel quel
+        rules.record("!join", false);
+        assert!(rules.needs_suffix("!join")); // doublon : suffixe invisible
+        rules.record("!join", true);
+        assert!(!rules.needs_suffix("!join")); // en alternance : sans suffixe
+        rules.record("!join", false);
+        assert!(!rules.needs_suffix("autre chose"));
+    }
+
+    #[test]
+    fn premier_message_et_reponse() {
+        let m = irc::parse(
+            "@first-msg=1;reply-parent-msg-id=abc-123;reply-parent-display-name=Alice;reply-parent-msg-body=salut\\sà\\stous :bob!bob@bob PRIVMSG #somechannel :@Alice coucou",
+        )
+        .unwrap();
+        let chat = parse_privmsg(&m).unwrap();
+        assert!(chat.first);
+        let reply = chat.reply.unwrap();
+        assert_eq!(reply.parent_name, "Alice");
+        assert_eq!(reply.parent_body, "salut à tous");
+        assert!(is_valid_message_id("885196de-cb67-427a-baa8-82f9b0fcd05f"));
+        assert!(!is_valid_message_id("abc;PRIVMSG"));
     }
 }
