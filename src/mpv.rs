@@ -89,9 +89,10 @@ impl Mpv {
             .arg(ipc_arg)
             .args(["--force-window=immediate", "--keep-open=no", "--idle=no"])
             .args(["--volume-max=100", &format!("--volume={}", options.volume)])
-            // Plafonne le tampon vidéo en mémoire : en direct, inutile de garder
-            // des dizaines de Mo d'images déjà vues (défaut de mpv : 150 + 50 Mio).
-            .args(["--demuxer-max-bytes=32MiB", "--demuxer-max-back-bytes=1MiB"]);
+            // Plafonne le tampon du flux en mémoire (défaut de mpv : 150 + 50 Mio).
+            // En faible latence, il ne contient que ~3 s de vidéo (~3 Mio en 1080p60) ;
+            // mesuré : 32 Mio faisait grimper mpv à ~240 Mo, 8 Mio le stabilise à ~197 Mo.
+            .args(["--demuxer-max-bytes=8MiB", "--demuxer-max-back-bytes=1MiB"]);
         match options.placement {
             Placement::Embedded(window) => {
                 command.arg(format!("--wid={window}"));

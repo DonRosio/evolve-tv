@@ -4,7 +4,6 @@
 //! chat IRC, API Twitch) et reçoit leurs résultats par un canal, comme `app.rs`.
 
 use std::collections::HashMap;
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -14,12 +13,12 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Color32, RichText};
 
 use crate::auth::{self, Outcome, Poll, Session};
+use crate::browser;
 use crate::chat::{Badge, Chat, ChatEvent, ChatLogin, SharedLogin};
 use crate::chat_panel::ChatPanel;
 use crate::emotes;
 use crate::helix::{self, BadgeImage};
 use crate::images::ImageCache;
-use crate::paths;
 
 /// Twitch demande de revérifier le jeton toutes les heures.
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -540,17 +539,5 @@ fn open_in_browser(url: &str) {
     if !url.starts_with("https://www.twitch.tv/activate") {
         return;
     }
-    let Some(xdg_open) = paths::find_program("xdg-open", None) else {
-        return;
-    };
-    let child = Command::new(xdg_open)
-        .arg(url)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
-    if let Ok(mut child) = child {
-        // Récupère le statut de fin pour ne pas laisser de processus « zombie ».
-        thread::spawn(move || child.wait());
-    }
+    browser::open(url);
 }

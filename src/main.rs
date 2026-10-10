@@ -4,6 +4,7 @@
 
 mod app;
 mod auth;
+mod browser;
 mod chat;
 mod chat_column;
 mod chat_panel;

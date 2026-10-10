@@ -8,6 +8,7 @@ use std::time::Duration;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{self, Color32, Key, Modifiers, Rect, RichText, Sense, Vec2};
 
+use crate::browser;
 use crate::chat::{Badge, ChatMessage, ClearTarget};
 use crate::emotes::{Emote, EmoteMap, Provider};
 use crate::helix::BadgeImage;
@@ -19,6 +20,10 @@ const MAX_CHATTERS: usize = 300;
 const EMOTE_HEIGHT: f32 = 28.0;
 const BADGE_SIZE: f32 = 18.0;
 const SUGGESTION_HEIGHT: f32 = 20.0;
+/// Couleur des liens (violet, comme sur Twitch).
+const LINK_COLOR: Color32 = Color32::from_rgb(169, 112, 255);
+/// Au-delà de cette longueur, un mot peut être coupé en fin de ligne.
+const LONG_WORD: usize = 30;
 /// Les animations sont redessinées au plus 30 fois par seconde.
 const MIN_FRAME_DELAY: f64 = 1.0 / 30.0;
 
@@ -44,6 +49,7 @@ const DEFAULT_COLORS: [[u8; 3]; 15] = [
 #[derive(Debug, PartialEq)]
 enum Segment {
     Text(String),
+    Link(String),
     Emote {
         name: String,
         url: String,
@@ -98,8 +104,18 @@ pub struct ChatPanel {
     /// Pseudos récemment actifs, le plus récent à la fin.
     chatters: VecDeque<String>,
     completion: Option<Completion>,
+    /// Lien cliqué, en attente de confirmation avant ouverture.
+    pending_link: Option<String>,
     scroll_to_bottom: bool,
     animate: bool,
+}
+
+/// Ce que le dessin des lignes doit signaler au panneau.
+#[derive(Default)]
+struct DrawOutput {
+    /// Délai avant la prochaine frame d'une emote animée visible.
+    next_repaint: Option<f64>,
+    clicked_link: Option<String>,
 }
 
 impl ChatPanel {
@@ -113,6 +129,7 @@ impl ChatPanel {
             badges: HashMap::new(),
             chatters: VecDeque::new(),
             completion: None,
+            pending_link: None,
             scroll_to_bottom: false,
             animate,
         }
@@ -310,11 +327,12 @@ impl ChatPanel {
         can_send: bool,
     ) -> Option<String> {
         let time = ui.input(|i| i.time);
-        let mut next_repaint: Option<f64> = None;
+        let mut out = DrawOutput::default();
         let mut to_send = None;
 
         egui::Panel::bottom("chat_saisie").show(ui, |ui| {
             ui.add_space(4.0);
+            self.link_confirmation_ui(ui);
             self.suggestions_ui(ui, images, time);
             let id = egui::Id::new("chat_saisie_texte");
             if can_send && ui.memory(|m| m.has_focus(id)) {
@@ -356,13 +374,11 @@ impl ChatPanel {
             ui.add_space(4.0);
         });
 
-        let mut area = egui::ScrollArea::vertical()
+        let scroll_to_bottom = std::mem::take(&mut self.scroll_to_bottom);
+        let area = egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             // Reste collé en bas… sauf si on remonte dans l'historique.
             .stick_to_bottom(true);
-        if std::mem::take(&mut self.scroll_to_bottom) {
-            area = area.vertical_scroll_offset(f32::MAX);
-        }
         let output = area.show_viewport(ui, |ui, viewport| {
             ui.spacing_mut().item_spacing.y = 3.0;
             let spacing = ui.spacing().item_spacing.y;
@@ -377,16 +393,24 @@ impl ChatPanel {
                     // Ligne hors écran : un simple espace de la bonne hauteur.
                     ui.allocate_space(egui::vec2(width, height));
                 } else {
-                    let rect = self.line_ui(ui, line, images, time, &mut next_repaint);
+                    let rect = self.line_ui(ui, line, images, time, &mut out);
                     line.height.set(rect.height());
                     line.width.set(width);
                 }
                 y += line.height.get() + spacing;
             }
+            if scroll_to_bottom {
+                // Fait défiler jusqu'à la fin réelle du contenu (le défilement se
+                // « recolle » alors au bas du chat).
+                ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
+            }
         });
+        if let Some(url) = out.clicked_link.take() {
+            self.pending_link = Some(url);
+        }
 
         // Redessine juste à temps pour la prochaine frame des emotes animées visibles.
-        if let Some(delay) = next_repaint {
+        if let Some(delay) = out.next_repaint {
             let delay = delay.max(MIN_FRAME_DELAY);
             ui.ctx()
                 .request_repaint_after(Duration::from_secs_f64(delay));
@@ -407,6 +431,43 @@ impl ChatPanel {
             }
         }
         to_send
+    }
+
+    /// Barre « Ouvrir ce lien ? » : montre le vrai domaine avant d'ouvrir le navigateur.
+    fn link_confirmation_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(url) = self.pending_link.clone() else {
+            return;
+        };
+        let mut close = false;
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Ouvrir un lien vers");
+                ui.label(
+                    RichText::new(browser::domain(&url))
+                        .strong()
+                        .color(LINK_COLOR),
+                );
+                ui.label("?");
+            });
+            let shown: String = url.chars().take(120).collect();
+            ui.label(RichText::new(shown).small().weak());
+            ui.horizontal(|ui| {
+                if ui.button("Ouvrir").clicked() {
+                    browser::open(&url);
+                    close = true;
+                }
+                if ui.button("Copier").clicked() {
+                    ui.ctx().copy_text(url.clone());
+                    close = true;
+                }
+                if ui.button("Annuler").clicked() {
+                    close = true;
+                }
+            });
+        });
+        if close {
+            self.pending_link = None;
+        }
     }
 
     /// Bande des propositions d'autocomplétion, au-dessus de la saisie.
@@ -454,7 +515,7 @@ impl ChatPanel {
         line: &Line,
         images: &mut ImageCache,
         time: f64,
-        next_repaint: &mut Option<f64>,
+        out: &mut DrawOutput,
     ) -> Rect {
         let (name, color, badges, segments, action, mention) = match &line.kind {
             LineKind::System(text) => {
@@ -507,12 +568,30 @@ impl ChatPanel {
                             if !text.trim().is_empty() {
                                 last_emote = None;
                             }
-                            let text = RichText::new(text);
-                            ui.label(if action {
-                                text.color(color).italics()
-                            } else {
-                                text
-                            });
+                            // Un mot par étiquette : le retour à la ligne se fait entre
+                            // les mots, comme sur Twitch (seuls les mots très longs sont coupés).
+                            for word in text.split_inclusive(' ') {
+                                let mut rich = RichText::new(word);
+                                if action {
+                                    rich = rich.color(color).italics();
+                                }
+                                ui.add(egui::Label::new(rich).wrap_mode(wrap_mode(word)));
+                            }
+                        }
+                        Segment::Link(url) => {
+                            last_emote = None;
+                            let rich = RichText::new(url).color(LINK_COLOR).underline();
+                            let response = ui
+                                .add(
+                                    egui::Label::new(rich)
+                                        .wrap_mode(wrap_mode(url))
+                                        .sense(Sense::click()),
+                                )
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .on_hover_text(format!("Ouvrir {}", browser::domain(url)));
+                            if response.clicked() {
+                                out.clicked_link = Some(url.clone());
+                            }
                         }
                         Segment::Emote {
                             name,
@@ -522,7 +601,7 @@ impl ChatPanel {
                         } => match images.get(url) {
                             Some(picture) => {
                                 let base = last_emote.filter(|_| *zero_width);
-                                let rect = self.paint_emote(ui, picture, base, time, next_repaint);
+                                let rect = self.paint_emote(ui, picture, base, time, out);
                                 if base.is_none() {
                                     ui.interact(
                                         rect,
@@ -554,7 +633,7 @@ impl ChatPanel {
         picture: &Picture,
         overlay_on: Option<Rect>,
         time: f64,
-        next_repaint: &mut Option<f64>,
+        out: &mut DrawOutput,
     ) -> Rect {
         let frame = picture.frame_at(time, self.animate);
         let size = frame.size * (EMOTE_HEIGHT / frame.size.y.max(1.0));
@@ -567,10 +646,20 @@ impl ChatPanel {
             ui.painter()
                 .image(frame.texture, rect, frame.uv, Color32::WHITE);
             if let Some(delay) = frame.next_change {
-                *next_repaint = Some(next_repaint.map_or(delay, |d| d.min(delay)));
+                out.next_repaint = Some(out.next_repaint.map_or(delay, |d| d.min(delay)));
             }
         }
         rect
+    }
+}
+
+/// Mot court : jamais coupé (il passe à la ligne entier). Mot très long (lien…) :
+/// coupé où il faut pour rester entièrement visible.
+fn wrap_mode(word: &str) -> egui::TextWrapMode {
+    if word.chars().count() > LONG_WORD {
+        egui::TextWrapMode::Wrap
+    } else {
+        egui::TextWrapMode::Extend
     }
 }
 
@@ -634,6 +723,10 @@ fn push_words(segments: &mut Vec<Segment>, text: &str, lookup: &dyn Fn(&str) -> 
     for (i, word) in text.split(' ').enumerate() {
         if i > 0 {
             append_text(segments, " ");
+        }
+        if browser::is_web_url(word) {
+            segments.push(Segment::Link(word.to_owned()));
+            continue;
         }
         match lookup(word) {
             Some(emote) => {
@@ -764,6 +857,23 @@ mod tests {
             matches!(&s[2], Segment::Emote { name, zero_width: true, .. } if name == "RainTime")
         );
         assert_eq!(s[3], Segment::Text(" KEKWx".into()));
+    }
+
+    #[test]
+    fn liens() {
+        let none = |_: &str| None;
+        let s = build_segments("clip https://www.twitch.tv/somechannel/clip/Abc ok", &[], &none);
+        assert_eq!(
+            s,
+            [
+                Segment::Text("clip ".into()),
+                Segment::Link("https://www.twitch.tv/somechannel/clip/Abc".into()),
+                Segment::Text(" ok".into())
+            ]
+        );
+        // Pas une adresse web : texte normal.
+        let s = build_segments("javascript:alert(1)", &[], &none);
+        assert_eq!(s, [Segment::Text("javascript:alert(1)".into())]);
     }
 
     #[test]
