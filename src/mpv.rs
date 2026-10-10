@@ -29,12 +29,29 @@ pub enum MpvEvent {
     EndFile(String),
 }
 
+/// Méthode d'affichage de la vidéo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Output {
+    /// Interface X11 « XVideo » : très légère en mémoire, décodage par le processeur.
+    Xv,
+    /// OpenGL/EGL via la carte graphique.
+    Gpu {
+        hardware_decoding: bool,
+        /// Ne charger que le pilote EGL NVIDIA : évite que Mesa (et ses 40 Mo
+        /// de LLVM) soit chargé pour rien quand le bureau tourne sur la NVIDIA.
+        nvidia_only: bool,
+    },
+}
+
+/// Fichier de déclaration du pilote EGL NVIDIA (bibliothèque glvnd).
+pub const NVIDIA_EGL_VENDOR: &str = "/usr/share/glvnd/egl_vendor.d/10_nvidia.json";
+
 pub struct Options<'a> {
     pub program: &'a Path,
     pub url: &'a str,
     pub placement: Placement,
+    pub output: Output,
     pub volume: u8,
-    pub hardware_decoding: bool,
     pub socket: PathBuf,
 }
 
@@ -43,6 +60,7 @@ pub struct Mpv {
     child: Child,
     socket: PathBuf,
     ipc: Option<UnixStream>,
+    output: Output,
 }
 
 impl Mpv {
@@ -71,11 +89,6 @@ impl Mpv {
             .arg(ipc_arg)
             .args(["--force-window=immediate", "--keep-open=no", "--idle=no"])
             .args(["--volume-max=100", &format!("--volume={}", options.volume)])
-            .arg(if options.hardware_decoding {
-                "--hwdec=auto-safe"
-            } else {
-                "--hwdec=no"
-            })
             // Plafonne le tampon vidéo en mémoire : en direct, inutile de garder
             // des dizaines de Mo d'images déjà vues (défaut de mpv : 150 + 50 Mio).
             .args(["--demuxer-max-bytes=32MiB", "--demuxer-max-back-bytes=1MiB"]);
@@ -85,6 +98,27 @@ impl Mpv {
             }
             Placement::Detached => {
                 command.args(["--title=Evolve TV — vidéo", "--geometry=960x540"]);
+            }
+        }
+        match options.output {
+            Output::Xv => {
+                command.args(["--vo=xv", "--hwdec=no"]);
+            }
+            Output::Gpu {
+                hardware_decoding,
+                nvidia_only,
+            } => {
+                command.args([
+                    "--vo=gpu",
+                    if hardware_decoding {
+                        "--hwdec=auto-safe"
+                    } else {
+                        "--hwdec=no"
+                    },
+                ]);
+                if nvidia_only {
+                    command.env("__EGL_VENDOR_LIBRARY_FILENAMES", NVIDIA_EGL_VENDOR);
+                }
             }
         }
         let child = command
@@ -102,7 +136,12 @@ impl Mpv {
             child,
             socket: options.socket,
             ipc: None,
+            output: options.output,
         })
+    }
+
+    pub fn output(&self) -> Output {
+        self.output
     }
 
     pub fn set_ipc(&mut self, stream: UnixStream) {

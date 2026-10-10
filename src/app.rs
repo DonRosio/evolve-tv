@@ -1,6 +1,7 @@
 //! Fenêtre principale : contrôles en haut, vidéo au centre, chat (étape 2) à droite.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -9,8 +10,8 @@ use eframe::egui::{self, Align2, Color32, FontId, Key, RichText};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use serde_json::{Value, json};
 
-use crate::config::Config;
-use crate::mpv::{self, Mpv, MpvEvent, Placement};
+use crate::config::{Config, VideoOutput};
+use crate::mpv::{self, Mpv, MpvEvent, Output, Placement};
 use crate::streamlink::{self, Server, ServerEvent};
 use crate::video_surface::VideoSurface;
 use crate::{network, paths};
@@ -28,6 +29,9 @@ enum Event {
     Mpv(u64, MpvEvent),
 }
 
+/// En sortie vidéo `auto`, hauteur maximale affichée par Xv (au-delà : GPU).
+const XV_MAX_HEIGHT: u32 = 480;
+
 enum Status {
     Stopped,
     Connecting,
@@ -42,6 +46,8 @@ struct Session {
     // Les champs sont détruits dans l'ordre de déclaration : mpv d'abord, puis streamlink.
     mpv: Option<(u64, Mpv)>,
     server: Server,
+    /// Liste de qualités transmise à streamlink (la première disponible est jouée).
+    qualities: Vec<String>,
     url: Option<String>,
     playing_quality: Option<String>,
     last_error: Option<String>,
@@ -61,6 +67,8 @@ pub struct EvolveApp {
     config_dirty: bool,
     streamlink_program: Option<PathBuf>,
     mpv_program: Option<PathBuf>,
+    /// Le bureau est affiché par le pilote NVIDIA (voir `display_uses_nvidia`).
+    nvidia_display: bool,
 
     profile: usize,
     /// Qualité choisie à la main (`None` : automatique selon le profil).
@@ -114,6 +122,7 @@ impl EvolveApp {
             config_dirty: false,
             streamlink_program,
             mpv_program,
+            nvidia_display: display_uses_nvidia(),
             quality: None,
             available: Vec::new(),
             wifi: None,
@@ -164,6 +173,7 @@ impl EvolveApp {
                     id,
                     mpv: None,
                     server,
+                    qualities,
                     url: None,
                     playing_quality: None,
                     last_error: None,
@@ -184,6 +194,16 @@ impl EvolveApp {
 
     /// Lance (ou relance) mpv sur le flux de la session, intégré ou détaché.
     fn launch_mpv(&mut self) {
+        // Qualité jouée si streamlink l'a déjà annoncée, sinon celle qu'il va choisir.
+        let Some(session) = &self.session else {
+            return;
+        };
+        let quality = session
+            .playing_quality
+            .clone()
+            .or_else(|| streamlink::expected_choice(&session.qualities, &self.available));
+        let output = self.output_for(quality.as_deref());
+
         let Some(session) = &mut self.session else {
             return;
         };
@@ -223,13 +243,32 @@ impl EvolveApp {
             program,
             url: &url,
             placement,
+            output,
             volume: self.config.player.volume,
-            hardware_decoding: self.config.player.hardware_decoding,
             socket,
         };
         match Mpv::spawn(options, on_event) {
             Ok(mpv) => session.mpv = Some((mpv_id, mpv)),
             Err(e) => self.status = Status::Error(e),
+        }
+    }
+
+    /// Sortie vidéo adaptée à une qualité donnée.
+    fn output_for(&self, quality: Option<&str>) -> Output {
+        let gpu = Output::Gpu {
+            hardware_decoding: self.config.player.hardware_decoding,
+            nvidia_only: self.nvidia_display,
+        };
+        match self.config.player.video_output {
+            VideoOutput::Xv => Output::Xv,
+            VideoOutput::Gpu => gpu,
+            VideoOutput::Auto => {
+                let small = quality.is_some_and(|q| {
+                    q == "audio_only"
+                        || streamlink::parse_resolution(q).is_some_and(|(h, _)| h <= XV_MAX_HEIGHT)
+                });
+                if small { Output::Xv } else { gpu }
+            }
         }
     }
 
@@ -265,8 +304,13 @@ impl EvolveApp {
                         self.launch_mpv();
                     }
                     ServerEvent::Opened(quality) => {
-                        session.playing_quality = Some(quality);
+                        let current = session.mpv.as_ref().map(|(_, mpv)| mpv.output());
+                        session.playing_quality = Some(quality.clone());
                         self.status = Status::Playing;
+                        // Prévision ratée : on relance mpv avec la sortie adaptée.
+                        if current.is_some_and(|o| o != self.output_for(Some(&quality))) {
+                            self.launch_mpv();
+                        }
                     }
                     ServerEvent::Error(message) => session.last_error = Some(message),
                 }
@@ -510,10 +554,15 @@ impl EvolveApp {
                     .as_ref()
                     .and_then(|s| s.playing_quality.as_deref())
                     .unwrap_or("?");
+                let output = match self.session.as_ref().and_then(|s| s.mpv.as_ref()) {
+                    Some((_, mpv)) if mpv.output() == Output::Xv => " · Xv",
+                    Some(_) => " · GPU",
+                    None => "",
+                };
                 let pause = if self.paused { " · en pause" } else { "" };
                 ui.colored_label(
                     Color32::from_rgb(235, 70, 70),
-                    format!("● En direct · {quality}{pause}"),
+                    format!("● En direct · {quality}{output}{pause}"),
                 )
             }
             Status::Error(e) => {
@@ -647,4 +696,13 @@ fn create_surface(cc: &eframe::CreationContext<'_>) -> Result<VideoSurface, Stri
         _ => return Err("nécessite une session X11".into()),
     };
     VideoSurface::new(parent)
+}
+
+/// Vrai si notre propre fenêtre est dessinée par le pilote OpenGL NVIDIA : le bureau
+/// tourne alors sur la NVIDIA, et mpv peut se limiter à ce pilote. On le lit dans la
+/// liste des bibliothèques chargées par notre processus (`/proc/self/maps`).
+fn display_uses_nvidia() -> bool {
+    Path::new(mpv::NVIDIA_EGL_VENDOR).exists()
+        && fs::read_to_string("/proc/self/maps")
+            .is_ok_and(|maps| maps.contains("libGLX_nvidia") || maps.contains("libEGL_nvidia"))
 }

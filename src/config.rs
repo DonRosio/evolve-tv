@@ -47,11 +47,27 @@ pub struct Profile {
 pub struct Player {
     /// Volume de 0 à 100, mémorisé entre deux lancements.
     pub volume: u8,
-    /// Décodage vidéo par la carte graphique : moins de CPU et de batterie.
+    /// Sortie vidéo de mpv : `auto`, `xv` ou `gpu` (voir `VideoOutput`).
+    pub video_output: VideoOutput,
+    /// En sortie `gpu` : décodage par la carte graphique (moins de CPU et de batterie).
     pub hardware_decoding: bool,
     /// Chemins imposés des programmes (sinon recherche automatique).
     pub streamlink_path: Option<PathBuf>,
     pub mpv_path: Option<PathBuf>,
+}
+
+/// Comment mpv affiche la vidéo. Mesures sur le PC de développement (GTX 960M) :
+/// Xv ≈ 87 Mo en 480p mais décode avec le processeur (115 % d'un cœur en 1080p60) ;
+/// GPU ≈ 190-200 Mo mais quasiment sans CPU.
+// `rename_all = "lowercase"` : dans le JSON, on écrit "auto", "xv" ou "gpu".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VideoOutput {
+    /// Xv jusqu'à 480p, GPU au-dessus.
+    #[default]
+    Auto,
+    Xv,
+    Gpu,
 }
 
 impl Default for Config {
@@ -81,6 +97,7 @@ impl Default for Player {
     fn default() -> Self {
         Player {
             volume: 70,
+            video_output: VideoOutput::Auto,
             hardware_decoding: true,
             streamlink_path: None,
             mpv_path: None,

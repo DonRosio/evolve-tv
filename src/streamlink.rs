@@ -70,6 +70,19 @@ pub fn candidates_up_to(max_quality: &str) -> Vec<String> {
     names
 }
 
+/// Prévoit la qualité que streamlink choisira : le premier nom de `candidates`
+/// présent dans `available` (triée de la meilleure à la moins bonne).
+pub fn expected_choice(candidates: &[String], available: &[String]) -> Option<String> {
+    let video = || available.iter().filter(|q| parse_resolution(q).is_some());
+    candidates
+        .iter()
+        .find_map(|candidate| match candidate.as_str() {
+            "best" => video().next().cloned(),
+            "worst" => video().next_back().cloned(),
+            name => available.iter().find(|q| *q == name).cloned(),
+        })
+}
+
 pub fn channel_url(channel: &str) -> String {
     format!("https://www.twitch.tv/{channel}")
 }
@@ -233,6 +246,26 @@ mod tests {
         let c = candidates_up_to("1080p30");
         assert_eq!(&c[..3], ["1080p30", "1080p", "936p60"]);
         assert_eq!(c.last().unwrap(), "best");
+    }
+
+    #[test]
+    fn prevision_du_choix() {
+        let available: Vec<String> = [
+            "1080p60",
+            "720p60",
+            "480p30",
+            "360p30",
+            "160p30",
+            "audio_only",
+        ]
+        .map(String::from)
+        .into();
+        let choice = |max| expected_choice(&candidates_up_to(max), &available);
+        assert_eq!(choice("480p").as_deref(), Some("480p30"));
+        assert_eq!(choice("1080p60").as_deref(), Some("1080p60"));
+        assert_eq!(choice("720p30").as_deref(), Some("480p30"));
+        assert_eq!(choice("100p").as_deref(), Some("160p30")); // repli « worst »
+        assert_eq!(expected_choice(&candidates_up_to("480p"), &[]), None);
     }
 
     #[test]
