@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 eframe = { version = "0.36.2", default-features = false, features = ["glow", "x11", "default_fonts"] }
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+image = { version = "0.25.10", default-features = false, features = ["gif", "png", "webp"] }
 keyring-core = "1"
 raw-window-handle = "0.6"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

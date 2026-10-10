@@ -1,7 +1,8 @@
 # Evolve TV
 
 Client Twitch léger pour Linux (X11) : la vidéo (mpv, intégrée et détachable) et
-le chat (lecture sans compte, écriture une fois connecté).
+le chat (lecture sans compte, écriture une fois connecté) avec les emotes Twitch,
+7TV, BTTV et FFZ, animées et zero-width.
 
 ## Prérequis
 
@@ -32,6 +33,17 @@ Mesurer la RAM (PSS, mpv et streamlink compris) pendant que l'application tourne
 | ↑ / ↓ | Volume ±5 |
 
 Fermer la fenêtre vidéo détachée la rattache à la fenêtre principale.
+
+Dans la zone de saisie du chat :
+
+| Touche | Action |
+|---|---|
+| Tab / Shift+Tab | Compléter le dernier mot (emotes puis pseudos), proposition suivante / précédente |
+| `@` + Tab | Compléter un pseudo parmi les personnes actives dans le chat |
+| Entrée | Envoyer |
+
+Les emotes 7TV, BTTV et FFZ de la chaîne sont rechargées à chaque connexion au chat,
+toutes les 30 minutes, ou avec le bouton « Actualiser les emotes ».
 
 ## Connexion au compte Twitch
 
@@ -82,6 +94,7 @@ chaque champ.
 | `profiles[].max_quality` | Qualité maximale : la meilleure qualité disponible **sans la dépasser** est choisie (`480p` → 480p30, sinon 360p…). Exemples : `480p`, `720p60`, `1080p60`. |
 | `profiles[].wifi_networks` | Noms (SSID) des réseaux Wi-Fi qui activent ce profil. Le bouton « Associer ce réseau » en bas de la fenêtre les remplit. |
 | `twitch_client_id` | ID client de ton application Twitch (type Public). Ce n'est pas un secret. `null` : chat en lecture seule. |
+| `animated_emotes` | `true` : emotes animées ; `false` : images fixes (moins de CPU, utile sur batterie). |
 | `player.volume` | Volume 0–100, mémorisé automatiquement. |
 | `player.video_output` | `auto` (Xv jusqu'à 480p, GPU au-dessus), `xv` (le plus léger en RAM, mais décodage par le processeur) ou `gpu` (le moins de CPU). |
 | `player.hardware_decoding` | En sortie GPU : décodage par la carte graphique. |
@@ -102,8 +115,10 @@ utilise alors la configuration par défaut **sans réécrire** le fichier.
 - Chat chiffré (TLS, bibliothèque rustls en pur Rust) ; messages sortants nettoyés
   (pas de retour à la ligne : impossible d'injecter une commande IRC).
 - Limites d'envoi de Twitch respectées (20 messages / 30 s, mode lent).
-- Images (emotes, badges) téléchargées uniquement depuis le CDN de Twitch, taille et
-  dimensions limitées, cache dans `~/.cache/evolve-tv` (droits `0700`).
+- Images (emotes, badges) téléchargées uniquement depuis les CDN officiels de Twitch,
+  7TV, BTTV et FFZ (adresses reconstruites à partir des identifiants, jamais reprises
+  telles quelles) ; formats PNG, GIF et WebP décodés en pur Rust ; taille, dimensions
+  et nombre de frames limités ; cache dans `~/.cache/evolve-tv` (droits `0700`).
 - Socket IPC de mpv dans `$XDG_RUNTIME_DIR/evolve-tv` (droits `0700`).
 - mpv décode le flux dans un processus séparé, qui n'aura jamais accès au jeton Twitch.
 

@@ -8,6 +8,7 @@ mod chat;
 mod chat_column;
 mod chat_panel;
 mod config;
+mod emotes;
 mod helix;
 mod http;
 mod icon;

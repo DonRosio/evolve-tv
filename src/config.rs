@@ -31,6 +31,8 @@ pub struct Config {
     /// Identifiant de l'application enregistrée sur dev.twitch.tv (type « Public »).
     /// Ce n'est pas un secret : Twitch le voit à chaque requête.
     pub twitch_client_id: Option<String>,
+    /// Emotes animées dans le chat (`false` : images fixes, moins de CPU).
+    pub animated_emotes: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -93,6 +95,7 @@ impl Default for Config {
             ],
             player: Player::default(),
             twitch_client_id: None,
+            animated_emotes: true,
         }
     }
 }

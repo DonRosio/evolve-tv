@@ -119,6 +119,7 @@ impl EvolveApp {
             &cc.egui_ctx,
             &config.channel,
             config.twitch_client_id.clone(),
+            config.animated_emotes,
         );
 
         EvolveApp {

@@ -16,6 +16,7 @@ use eframe::egui::{self, Color32, RichText};
 use crate::auth::{self, Outcome, Poll, Session};
 use crate::chat::{Badge, Chat, ChatEvent, ChatLogin, SharedLogin};
 use crate::chat_panel::ChatPanel;
+use crate::emotes;
 use crate::helix::{self, BadgeImage};
 use crate::images::ImageCache;
 use crate::paths;
@@ -23,6 +24,10 @@ use crate::paths;
 /// Twitch demande de revérifier le jeton toutes les heures.
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
+/// Rechargement des emotes 7TV/BTTV/FFZ (une emote ajoutée par la chaîne apparaît ainsi).
+const EMOTES_REFRESH: Duration = Duration::from_secs(30 * 60);
+/// Pas de rechargement plus fréquent que ça (ex. reconnexions en série).
+const EMOTES_MIN_INTERVAL: Duration = Duration::from_secs(60);
 
 enum Msg {
     Auth(Outcome),
@@ -31,6 +36,7 @@ enum Msg {
     Chat(u64, ChatEvent),
     Badges(Result<HashMap<Badge, BadgeImage>, String>),
     UserEmotes(Result<HashMap<String, String>, String>),
+    ThirdParty(emotes::Loaded),
 }
 
 enum AuthState {
@@ -52,6 +58,7 @@ enum Action {
     Login,
     CancelLogin,
     Logout,
+    RefreshEmotes,
 }
 
 pub struct ChatColumn {
@@ -70,13 +77,20 @@ pub struct ChatColumn {
     login: SharedLogin,
     room_id: Option<String>,
     badges_for: Option<String>,
+    /// Dernier chargement des emotes tierces (chaîne + instant).
+    emotes_loaded: Option<(String, Instant)>,
 
     panel: ChatPanel,
     images: ImageCache,
 }
 
 impl ChatColumn {
-    pub fn new(ctx: &egui::Context, channel: &str, client_id: Option<String>) -> ChatColumn {
+    pub fn new(
+        ctx: &egui::Context,
+        channel: &str,
+        client_id: Option<String>,
+        animate: bool,
+    ) -> ChatColumn {
         let (tx, rx) = mpsc::channel();
         let mut column = ChatColumn {
             ctx: ctx.clone(),
@@ -96,7 +110,8 @@ impl ChatColumn {
             login: Arc::new(Mutex::new(None)),
             room_id: None,
             badges_for: None,
-            panel: ChatPanel::default(),
+            emotes_loaded: None,
+            panel: ChatPanel::new(animate),
             images: ImageCache::new(ctx),
         };
         match column.client_id.clone() {
@@ -158,6 +173,31 @@ impl ChatColumn {
             }
         }
         self.fetch_badges_if_needed();
+        if self
+            .emotes_loaded
+            .as_ref()
+            .is_some_and(|(_, at)| at.elapsed() >= EMOTES_REFRESH)
+        {
+            self.load_emotes(false);
+        }
+    }
+
+    /// Charge les emotes 7TV/BTTV/FFZ de la chaîne (sauf si c'est tout récent).
+    fn load_emotes(&mut self, force: bool) {
+        let Some(room) = self.room_id.clone() else {
+            return;
+        };
+        let recent = self
+            .emotes_loaded
+            .as_ref()
+            .is_some_and(|(loaded_room, at)| {
+                *loaded_room == room && at.elapsed() < EMOTES_MIN_INTERVAL
+            });
+        if recent && !force {
+            return;
+        }
+        self.emotes_loaded = Some((room.clone(), Instant::now()));
+        self.spawn(move || Msg::ThirdParty(emotes::load(&room)));
     }
 
     fn handle(&mut self, msg: Msg) {
@@ -188,6 +228,19 @@ impl ChatColumn {
                     .panel
                     .push_system(format!("Badges indisponibles : {e}")),
             },
+            Msg::ThirdParty(loaded) => {
+                let counts: Vec<String> = loaded
+                    .counts
+                    .iter()
+                    .map(|(provider, n)| format!("{} {n}", provider.label()))
+                    .collect();
+                self.panel
+                    .push_system(format!("Emotes chargées : {}", counts.join(", ")));
+                for error in loaded.errors {
+                    self.panel.push_system(format!("⚠ Emotes {error}"));
+                }
+                self.panel.set_third_party(loaded.emotes);
+            }
             Msg::UserEmotes(result) => match result {
                 Ok(emotes) => self.panel.set_user_emotes(emotes),
                 Err(e) => self
@@ -268,7 +321,11 @@ impl ChatColumn {
             ChatEvent::Notice(text) => self.panel.push_system(text),
             ChatEvent::SendRejected(reason) => self.panel.push_system(format!("⚠ {reason}")),
             ChatEvent::Clear(target) => self.panel.clear(target),
-            ChatEvent::RoomId(id) => self.room_id = Some(id),
+            ChatEvent::RoomId(id) => {
+                self.room_id = Some(id);
+                // À chaque (re)connexion au chat.
+                self.load_emotes(false);
+            }
             ChatEvent::AuthFailed => self.on_chat_auth_failed(),
         }
     }
@@ -349,6 +406,7 @@ impl ChatColumn {
                 self.panel.push_system("Déconnecté de Twitch.");
                 self.set_logged_out();
             }
+            Action::RefreshEmotes => self.load_emotes(true),
         }
     }
 
@@ -356,8 +414,17 @@ impl ChatColumn {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
-        ui.label(RichText::new(format!("Chat de {}", self.channel)).heading());
-        let action = self.account_ui(ui);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("Chat de {}", self.channel)).heading());
+        });
+        let mut action = self.account_ui(ui);
+        if ui
+            .small_button("Actualiser les emotes")
+            .on_hover_text("Recharge les emotes 7TV, BTTV et FFZ de la chaîne")
+            .clicked()
+        {
+            action = Some(Action::RefreshEmotes);
+        }
         ui.separator();
         if let Some(action) = action {
             self.apply(action);
