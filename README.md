@@ -10,6 +10,15 @@ le chat (lecture sans compte, écriture une fois connecté) avec les emotes Twit
 - `mpv` et `streamlink` (dans le PATH ou dans `~/.local/bin`) ;
 - une session **X11** (la vidéo intégrée utilise `mpv --wid`).
 
+## Installer (menu Cinnamon)
+
+```bash
+cargo build --release && ./scripts/installer.sh
+```
+
+Installe le programme dans `~/.local/bin`, l'icône et le lanceur dans `~/.local/share`
+(aucun droit administrateur). Après une mise à jour du code, relancer les deux commandes.
+
 ## Compiler et lancer
 
 ```bash
