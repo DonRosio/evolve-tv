@@ -78,7 +78,10 @@ impl Picker {
                     .hint_text("Rechercher…")
                     .desired_width(140.0),
             );
-            if ui.button("Fermer").clicked() {
+            if ui
+                .button(format!("{} Fermer", egui_phosphor::regular::X))
+                .clicked()
+            {
                 self.open = false;
             }
         });

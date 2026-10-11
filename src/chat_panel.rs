@@ -8,9 +8,10 @@ use std::time::Duration;
 
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{
-    self, Color32, FontId, Key, Modifiers, Pos2, Rect, RichText, Sense, Shape, Stroke, Vec2, pos2,
-    vec2,
+    self, Color32, FontId, Key, Modifiers, Pos2, Rect, RichText, Sense, Shape, Vec2, pos2, vec2,
 };
+
+use egui_phosphor::regular as icon;
 
 use crate::browser;
 use crate::chat::{Badge, ChatMessage, ClearTarget, ReplyInfo, ReplyTarget, is_valid_message_id};
@@ -29,6 +30,8 @@ const BADGE_SIZE: f32 = 18.0;
 /// Les emojis sont affichés à la taille du texte.
 const EMOJI_SIZE: f32 = 18.0;
 const SUGGESTION_HEIGHT: f32 = 20.0;
+/// Marge réservée à droite de chaque message pour les boutons Copier / Répondre.
+const ACTIONS_WIDTH: f32 = 48.0;
 /// Texte des messages : presque blanc, bien lisible sur le fond sombre.
 const TEXT_COLOR: Color32 = Color32::from_gray(230);
 /// Fond d'un message survolé, et d'une emote survolée (un peu plus clair).
@@ -145,6 +148,7 @@ pub struct ChatPanel {
     pending_link: Option<String>,
     /// Message auquel on est en train de répondre.
     replying: Option<ReplyTarget>,
+    line_menu: Option<LineMenu>,
     focus_input: bool,
     /// Boutons de messages enregistrés et emotes favorites (copie de la config).
     saved_messages: Vec<SavedMessage>,
@@ -165,6 +169,14 @@ struct DrawOutput {
     next_repaint: Option<f64>,
     clicked_link: Option<String>,
     reply: Option<ReplyTarget>,
+    menu: Option<LineMenu>,
+}
+
+/// Menu ouvert par un clic droit sur un message.
+struct LineMenu {
+    pos: Pos2,
+    target: ReplyTarget,
+    can_reply: bool,
 }
 
 impl ChatPanel {
@@ -181,6 +193,7 @@ impl ChatPanel {
             completion: None,
             pending_link: None,
             replying: None,
+            line_menu: None,
             focus_input: false,
             saved_messages: Vec::new(),
             favorites: Vec::new(),
@@ -547,7 +560,13 @@ impl ChatPanel {
         if let Some(url) = out.clicked_link.take() {
             self.pending_link = Some(url);
         }
+        if let Some(menu) = out.menu.take() {
+            self.line_menu = Some(menu);
+        }
         if let Some(target) = out.reply.take() {
+            self.start_reply(target);
+        }
+        if let Some(target) = self.line_menu_ui(ui.ctx()) {
             self.start_reply(target);
         }
 
@@ -587,7 +606,11 @@ impl ChatPanel {
         let mut remove: Option<usize> = None;
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            let arrow = if self.bar_collapsed { "▸" } else { "▾" };
+            let arrow = if self.bar_collapsed {
+                icon::CARET_RIGHT
+            } else {
+                icon::CARET_DOWN
+            };
             if ui
                 .small_button(arrow)
                 .on_hover_text("Afficher / masquer les raccourcis")
@@ -627,7 +650,7 @@ impl ChatPanel {
             let draft = self.input.trim();
             let can_save = config::is_valid_saved_text(draft) && self.saved_messages.len() < 50;
             if ui
-                .add_enabled(can_save, egui::Button::new("+"))
+                .add_enabled(can_save, egui::Button::new(icon::PLUS))
                 .on_hover_text("Enregistrer le texte de la saisie comme bouton")
                 .clicked()
             {
@@ -673,9 +696,9 @@ impl ChatPanel {
                     }
                 }
                 let label = if self.picker.open {
-                    "Retour au chat"
+                    format!("{} Retour au chat", icon::ARROW_LEFT)
                 } else {
-                    "★ Emotes"
+                    format!("{} Emotes", icon::SMILEY)
                 };
                 if ui
                     .small_button(label)
@@ -724,6 +747,45 @@ impl ChatPanel {
             }
             emote_picker::Action::Insert(name) => self.insert_text(&name),
         }
+    }
+
+    /// Menu du clic droit sur un message. Renvoie le message auquel répondre.
+    fn line_menu_ui(&mut self, ctx: &egui::Context) -> Option<ReplyTarget> {
+        let menu = self.line_menu.as_ref()?;
+        let mut close = false;
+        let mut reply = None;
+        let area = egui::Area::new(egui::Id::new("menu_message"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(menu.pos)
+            .constrain(true)
+            .show(ctx, |ui| {
+                egui::Frame::menu(ui.style()).show(ui, |ui| {
+                    ui.set_min_width(170.0);
+                    let item = |ui: &mut egui::Ui, glyph: &str, label: &str| {
+                        ui.add(egui::Button::new(format!("{glyph}  {label}")).frame(false))
+                            .clicked()
+                    };
+                    if item(ui, icon::COPY, "Copier le message") {
+                        ctx.copy_text(menu.target.body.clone());
+                        close = true;
+                    }
+                    if item(ui, icon::USER, "Copier le pseudo") {
+                        ctx.copy_text(menu.target.name.clone());
+                        close = true;
+                    }
+                    if menu.can_reply && item(ui, icon::ARROW_BEND_UP_LEFT, "Répondre") {
+                        reply = Some(menu.target.clone());
+                        close = true;
+                    }
+                });
+            });
+        // Un clic ailleurs ou Échap ferme le menu.
+        let clicked_outside =
+            ctx.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer();
+        if close || clicked_outside || ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.line_menu = None;
+        }
+        reply
     }
 
     /// Bandeau « Réponse à @pseudo » au-dessus de la saisie.
@@ -867,54 +929,60 @@ impl ChatPanel {
             .show(ui, |ui| {
                 // Fond (survol, premier message, mention) sur toute la largeur du chat.
                 ui.set_min_width(ui.available_width());
-                if *first {
-                    ui.label(
-                        RichText::new("Premier message")
+                // Les boutons du survol ont leur propre marge à droite : le texte
+                // ne passe jamais dessous.
+                let content_width = (ui.available_width() - ACTIONS_WIDTH).max(80.0);
+                ui.scope(|ui| {
+                    ui.set_max_width(content_width);
+                    if *first {
+                        ui.label(
+                            RichText::new("Premier message")
+                                .small()
+                                .strong()
+                                .color(FIRST_COLOR),
+                        );
+                    }
+                    if let Some(reply) = reply {
+                        ui.label(
+                            RichText::new(format!(
+                                "En réponse à @{} : {}",
+                                reply.parent_name,
+                                truncate(&reply.parent_body, 80)
+                            ))
                             .small()
-                            .strong()
-                            .color(FIRST_COLOR),
-                    );
-                }
-                if let Some(reply) = reply {
-                    ui.label(
-                        RichText::new(format!(
-                            "En réponse à @{} : {}",
-                            reply.parent_name,
-                            truncate(&reply.parent_body, 80)
-                        ))
-                        .small()
-                        .weak(),
-                    );
-                }
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    for badge in badges {
-                        let Some(info) = self.badges.get(badge) else {
-                            continue;
-                        };
-                        if let Some(picture) = images.get(&info.url) {
-                            let frame = picture.frame_at(time, false);
-                            let (rect, response) =
-                                ui.allocate_exact_size(Vec2::splat(BADGE_SIZE), Sense::hover());
-                            ui.painter()
-                                .image(frame.texture, rect, frame.uv, Color32::WHITE);
-                            response.on_hover_text(&info.title);
-                            ui.add_space(3.0);
+                            .weak(),
+                        );
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        for badge in badges {
+                            let Some(info) = self.badges.get(badge) else {
+                                continue;
+                            };
+                            if let Some(picture) = images.get(&info.url) {
+                                let frame = picture.frame_at(time, false);
+                                let (rect, response) =
+                                    ui.allocate_exact_size(Vec2::splat(BADGE_SIZE), Sense::hover());
+                                ui.painter()
+                                    .image(frame.texture, rect, frame.uv, Color32::WHITE);
+                                response.on_hover_text(&info.title);
+                                ui.add_space(3.0);
+                            }
                         }
-                    }
-                    ui.label(RichText::new(name).color(color).strong());
-                    ui.label(if action { " " } else { ": " });
-                    if line.deleted {
-                        ui.label(RichText::new("<message supprimé>").italics().weak());
-                        return;
-                    }
-                    if art {
-                        // Art ASCII : chaque « mot » est une ligne du dessin, collées
-                        // les unes aux autres.
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.end_row();
-                    }
-                    self.segments_ui(ui, segments, color, action, art, images, time, out);
+                        ui.label(RichText::new(name).color(color).strong());
+                        ui.label(if action { " " } else { ": " });
+                        if line.deleted {
+                            ui.label(RichText::new("<message supprimé>").italics().weak());
+                            return;
+                        }
+                        if art {
+                            // Art ASCII : chaque « mot » est une ligne du dessin, collées
+                            // les unes aux autres.
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            ui.end_row();
+                        }
+                        self.segments_ui(ui, segments, color, action, art, images, time, out);
+                    });
                 });
             })
             .response
@@ -924,6 +992,20 @@ impl ChatPanel {
             ui.painter()
                 .set(hover_background, Shape::rect_filled(rect, 3.0, HOVER_BG));
             self.hover_actions_ui(ui, line, rect, can_reply, out);
+            // Clic droit n'importe où sur le message : menu Copier / Répondre.
+            if ui.input(|i| i.pointer.secondary_clicked())
+                && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
+            {
+                out.menu = Some(LineMenu {
+                    pos,
+                    target: ReplyTarget {
+                        id: line.id.clone(),
+                        name: line.display_name.clone(),
+                        body: line.text.clone(),
+                    },
+                    can_reply: can_reply && !line.deleted && is_valid_message_id(&line.id),
+                });
+            }
         }
         rect
     }
@@ -1057,7 +1139,17 @@ impl ChatPanel {
                 Color32::from_gray(65)
             };
             ui.painter().rect_filled(button, 4.0, background);
-            paint_icon(ui.painter(), button, icon);
+            let glyph = match icon {
+                Icon::Copy => icon::COPY,
+                Icon::Reply => icon::ARROW_BEND_UP_LEFT,
+            };
+            ui.painter().text(
+                button.center(),
+                egui::Align2::CENTER_CENTER,
+                glyph,
+                FontId::proportional(14.0),
+                Color32::WHITE,
+            );
             if response.clicked() {
                 match icon {
                     Icon::Copy => ui.ctx().copy_text(line.text.clone()),
@@ -1115,34 +1207,6 @@ impl ChatPanel {
 enum Icon {
     Copy,
     Reply,
-}
-
-/// Petites icônes dessinées à la main (la police intégrée n'en a pas de jolies).
-fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon) {
-    let stroke = Stroke::new(1.5, Color32::WHITE);
-    let c = rect.center();
-    match icon {
-        Icon::Copy => {
-            // Deux feuilles superposées.
-            let back = Rect::from_min_size(c + vec2(-6.0, -6.0), vec2(8.0, 9.0));
-            let front = Rect::from_min_size(c + vec2(-2.0, -3.0), vec2(8.0, 9.0));
-            painter.rect_stroke(back, 1.5, stroke, egui::StrokeKind::Inside);
-            painter.rect_filled(front, 1.5, Color32::from_gray(65));
-            painter.rect_stroke(front, 1.5, stroke, egui::StrokeKind::Inside);
-        }
-        Icon::Reply => {
-            // Flèche de retour : ↩
-            let points: Vec<Pos2> = vec![
-                c + vec2(6.0, 5.0),
-                c + vec2(6.0, 1.0),
-                c + vec2(4.0, -1.0),
-                c + vec2(-5.0, -1.0),
-            ];
-            painter.add(Shape::line(points, stroke));
-            painter.line_segment([c + vec2(-5.0, -1.0), c + vec2(-1.5, -4.5)], stroke);
-            painter.line_segment([c + vec2(-5.0, -1.0), c + vec2(-1.5, 2.5)], stroke);
-        }
-    }
 }
 
 /// Nom de l'emote (et son service) affiché au-dessus d'elle, dans la colonne du chat.

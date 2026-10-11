@@ -21,6 +21,7 @@ mod mpv;
 mod network;
 mod paths;
 mod streamlink;
+mod style;
 mod video_surface;
 
 use eframe::egui;

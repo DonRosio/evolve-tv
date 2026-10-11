@@ -29,8 +29,12 @@ Mesurer la RAM (PSS, mpv et streamlink compris) pendant que l'application tourne
 |---|---|
 | Espace | Pause / reprise **au direct** (la reprise reconnecte mpv au direct) |
 | F ou F11 | Plein écran (Échap pour sortir) |
+| T | Mode théâtre : masque les barres du haut et du bas (Échap pour sortir) |
 | M | Couper / rétablir le son |
 | ↑ / ↓ | Volume ±5 |
+
+La barre sous la vidéo regroupe : lancer / arrêter, pause (reprise au direct), son et
+volume, qualité, mode théâtre, détacher la vidéo, plein écran.
 
 Fermer la fenêtre vidéo détachée la rattache à la fenêtre principale.
 
@@ -43,7 +47,8 @@ Dans la zone de saisie du chat :
 | Entrée | Envoyer |
 
 Au survol d'un message : **Copier** et **Répondre** (vraie réponse Twitch, reliée au
-message d'origine). Les liens s'ouvrent après confirmation (le domaine réel est affiché).
+message d'origine), dans une marge réservée qui ne cache jamais le texte. Clic droit sur
+un message : copier le message, copier le pseudo, répondre. Les liens s'ouvrent après confirmation (le domaine réel est affiché).
 
 ### Raccourcis (barre sous la saisie)
 
@@ -153,3 +158,5 @@ utilise alors la configuration par défaut **sans réécrire** le fichier.
 
 Emojis : [Twemoji](https://github.com/jdecked/twemoji), © Twitter, Inc et contributeurs,
 licence [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+Icônes : [Phosphor](https://phosphoricons.com) (via la crate `egui-phosphor`), licence MIT.

@@ -11,6 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, RichText};
+use egui_phosphor::regular as icon;
 
 use crate::auth::{self, Outcome, Poll, Session};
 use crate::browser;
@@ -425,7 +426,7 @@ impl ChatColumn {
         });
         let mut action = self.account_ui(ui);
         if ui
-            .small_button("Actualiser les emotes")
+            .small_button(format!("{} Actualiser les emotes", icon::ARROW_CLOCKWISE))
             .on_hover_text("Recharge les emotes 7TV, BTTV et FFZ de la chaîne")
             .clicked()
         {
@@ -462,7 +463,10 @@ impl ChatColumn {
                 if let AuthState::Error(e) = &self.auth {
                     ui.colored_label(Color32::from_rgb(235, 70, 70), format!("Compte : {e}"));
                 }
-                if ui.button("Se connecter à Twitch").clicked() {
+                if ui
+                    .button(format!("{} Se connecter à Twitch", icon::SIGN_IN))
+                    .clicked()
+                {
                     action = Some(Action::Login);
                 }
             }
@@ -490,7 +494,10 @@ impl ChatColumn {
             AuthState::LoggedIn(session) => {
                 ui.horizontal(|ui| {
                     ui.label(format!("Connecté : {}", session.identity.login));
-                    if ui.small_button("Se déconnecter").clicked() {
+                    if ui
+                        .small_button(format!("{} Se déconnecter", icon::SIGN_OUT))
+                        .clicked()
+                    {
                         action = Some(Action::Logout);
                     }
                 });

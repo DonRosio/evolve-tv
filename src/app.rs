@@ -6,7 +6,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Align2, Color32, FontId, Key, RichText};
+use eframe::egui::{self, Align, Align2, Color32, FontId, Key, Layout, RichText};
+use egui_phosphor::regular as icon;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use serde_json::{Value, json};
 
@@ -15,7 +16,7 @@ use crate::config::{Config, VideoOutput};
 use crate::mpv::{self, Mpv, MpvEvent, Output, Placement};
 use crate::streamlink::{self, Server, ServerEvent};
 use crate::video_surface::VideoSurface;
-use crate::{network, paths};
+use crate::{network, paths, style};
 
 /// Messages envoyés par les threads de fond vers l'interface.
 ///
@@ -87,7 +88,10 @@ pub struct EvolveApp {
     embed_error: Option<String>,
     detached: bool,
     fullscreen: bool,
+    /// Mode théâtre : barres du haut et du bas masquées (vidéo + chat + contrôles).
+    theater: bool,
     paused: bool,
+    muted: bool,
 
     chat: ChatColumn,
 }
@@ -99,7 +103,7 @@ impl EvolveApp {
         config_error: Option<String>,
     ) -> Self {
         let (tx, rx) = mpsc::channel();
-        install_fallback_font(&cc.egui_ctx);
+        style::install(&cc.egui_ctx);
 
         let (surface, embed_error) = match create_surface(cc) {
             Ok(surface) => (Some(surface), None),
@@ -142,7 +146,9 @@ impl EvolveApp {
             surface,
             embed_error,
             fullscreen: false,
+            theater: false,
             paused: false,
+            muted: false,
         }
     }
 
@@ -338,6 +344,7 @@ impl EvolveApp {
                             self.config_dirty = true;
                         }
                     }
+                    MpvEvent::Mute(muted) => self.muted = muted,
                     MpvEvent::EndFile(reason) => session.end_reason = Some(reason),
                 }
             }
@@ -465,13 +472,20 @@ impl EvolveApp {
         }
         if pressed(Key::F11) || pressed(Key::F) || (pressed(Key::Escape) && self.fullscreen) {
             self.toggle_fullscreen();
+        } else if pressed(Key::T) || (pressed(Key::Escape) && self.theater) {
+            self.theater = !self.theater;
         }
     }
 
+    /// Barre du haut : chaîne, profil, état.
     fn controls_ui(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Evolve TV").strong());
+            ui.label(
+                RichText::new(format!("{} Evolve TV", icon::BROADCAST))
+                    .strong()
+                    .color(style::ACCENT),
+            );
             ui.separator();
             ui.label(format!("Chaîne : {}", self.config.channel));
             ui.separator();
@@ -495,53 +509,138 @@ impl EvolveApp {
                     self.start();
                 }
             }
-
-            let auto = format!(
-                "Auto (jusqu'à {})",
-                self.config.profiles[self.profile].max_quality
-            );
-            let mut quality = self.quality.clone();
-            egui::ComboBox::from_id_salt("qualite")
-                .selected_text(quality.clone().unwrap_or_else(|| auto.clone()))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut quality, None, auto);
-                    for q in &self.available {
-                        ui.selectable_value(&mut quality, Some(q.clone()), q.as_str());
-                    }
-                });
-            if quality != self.quality {
-                self.quality = quality;
-                if self.session.is_some() {
-                    self.start();
-                }
-            }
-            ui.separator();
-
-            if self.session.is_some() {
-                if ui.button("⏹ Arrêter").clicked() {
-                    self.stop();
-                }
-            } else if ui.button("▶ Lancer").clicked() {
-                self.start();
-            }
-            let label = if self.detached {
-                "Rattacher la vidéo"
-            } else {
-                "Détacher la vidéo"
-            };
-            let detach = ui
-                .add_enabled(self.surface.is_some(), egui::Button::new(label))
-                .on_disabled_hover_text("Vidéo intégrée indisponible (voir en bas de la fenêtre)");
-            if detach.clicked() {
-                self.toggle_detach();
-            }
-            if ui.button("Plein écran (F)").clicked() {
-                self.toggle_fullscreen();
-            }
-            ui.separator();
-            self.status_ui(ui);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                self.status_ui(ui)
+            });
         });
         ui.add_space(4.0);
+    }
+
+    fn quality_ui(&mut self, ui: &mut egui::Ui) {
+        let auto = format!(
+            "Auto (jusqu'à {})",
+            self.config.profiles[self.profile].max_quality
+        );
+        let mut quality = self.quality.clone();
+        egui::ComboBox::from_id_salt("qualite")
+            .selected_text(quality.clone().unwrap_or_else(|| auto.clone()))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut quality, None, auto);
+                for q in &self.available {
+                    ui.selectable_value(&mut quality, Some(q.clone()), q.as_str());
+                }
+            })
+            .response
+            .on_hover_text("Qualité de la vidéo");
+        if quality != self.quality {
+            self.quality = quality;
+            if self.session.is_some() {
+                self.start();
+            }
+        }
+    }
+
+    /// Barre de contrôles sous la vidéo.
+    fn player_bar_ui(&mut self, ui: &mut egui::Ui) {
+        let big = |text: &str| RichText::new(text).size(18.0);
+        let playing = self.session.as_ref().is_some_and(|s| s.mpv.is_some());
+        ui.add_space(3.0);
+        ui.horizontal(|ui| {
+            if self.session.is_some() {
+                if ui
+                    .button(big(icon::STOP))
+                    .on_hover_text("Arrêter le stream")
+                    .clicked()
+                {
+                    self.stop();
+                }
+            } else if ui
+                .button(big(icon::PLAY))
+                .on_hover_text("Lancer le stream")
+                .clicked()
+            {
+                self.start();
+            }
+            let (pause_icon, pause_tip) = if self.paused {
+                (icon::PLAY, "Reprendre au direct (Espace)")
+            } else {
+                (icon::PAUSE, "Pause (Espace)")
+            };
+            if ui
+                .add_enabled(playing, egui::Button::new(big(pause_icon)))
+                .on_hover_text(pause_tip)
+                .clicked()
+            {
+                self.toggle_pause();
+            }
+
+            let volume_icon = if self.muted || self.config.player.volume == 0 {
+                icon::SPEAKER_X
+            } else {
+                icon::SPEAKER_HIGH
+            };
+            if ui
+                .add_enabled(playing, egui::Button::new(big(volume_icon)))
+                .on_hover_text("Couper / rétablir le son (M)")
+                .clicked()
+            {
+                self.mpv_command(json!(["cycle", "mute"]));
+            }
+            let mut volume = self.config.player.volume;
+            ui.spacing_mut().slider_width = 90.0;
+            let slider = ui
+                .add(egui::Slider::new(&mut volume, 0..=100).show_value(false))
+                .on_hover_text(format!("Volume : {volume} % (flèches haut / bas)"));
+            if slider.changed() {
+                // Sans vidéo en cours, le volume sera appliqué au prochain lancement.
+                self.mpv_command(json!(["set_property", "volume", volume]));
+                self.config.player.volume = volume;
+                self.config_dirty = true;
+            }
+            ui.separator();
+            self.quality_ui(ui);
+
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let (fullscreen_icon, fullscreen_tip) = if self.fullscreen {
+                    (icon::CORNERS_IN, "Quitter le plein écran (F / Échap)")
+                } else {
+                    (icon::CORNERS_OUT, "Plein écran (F)")
+                };
+                if ui
+                    .button(big(fullscreen_icon))
+                    .on_hover_text(fullscreen_tip)
+                    .clicked()
+                {
+                    self.toggle_fullscreen();
+                }
+                let (detach_icon, detach_tip) = if self.detached {
+                    (icon::ARROW_SQUARE_IN, "Rattacher la vidéo à la fenêtre")
+                } else {
+                    (
+                        icon::ARROW_SQUARE_OUT,
+                        "Détacher la vidéo dans sa propre fenêtre",
+                    )
+                };
+                if ui
+                    .add_enabled(self.surface.is_some(), egui::Button::new(big(detach_icon)))
+                    .on_hover_text(detach_tip)
+                    .on_disabled_hover_text(
+                        "Vidéo intégrée indisponible (voir en bas de la fenêtre)",
+                    )
+                    .clicked()
+                {
+                    self.toggle_detach();
+                }
+                if ui
+                    .add(egui::Button::new(big(icon::FRAME_CORNERS)).selected(self.theater))
+                    .on_hover_text("Mode théâtre : masquer les barres (T)")
+                    .clicked()
+                {
+                    self.theater = !self.theater;
+                }
+            });
+        });
+        ui.add_space(3.0);
     }
 
     fn status_ui(&self, ui: &mut egui::Ui) {
@@ -641,7 +740,7 @@ impl EvolveApp {
                 Status::Playing if self.detached => {
                     "Vidéo détachée dans sa propre fenêtre".to_owned()
                 }
-                Status::Stopped => "Clique sur « Lancer » pour regarder le stream".to_owned(),
+                Status::Stopped => format!("Clique sur {} pour regarder le stream", icon::PLAY),
                 Status::Connecting => "Connexion à Twitch…".to_owned(),
                 Status::Offline => format!(
                     "{} est hors ligne\nLe stream se lancera tout seul au début du live",
@@ -683,13 +782,17 @@ impl eframe::App for EvolveApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_shortcuts(&ui.ctx().clone());
         if !self.fullscreen {
-            egui::Panel::top("controles").show(ui, |ui| self.controls_ui(ui));
-            egui::Panel::bottom("reseau").show(ui, |ui| self.network_ui(ui));
+            if !self.theater {
+                egui::Panel::top("controles").show(ui, |ui| self.controls_ui(ui));
+                egui::Panel::bottom("reseau").show(ui, |ui| self.network_ui(ui));
+            }
             egui::Panel::right("chat")
                 .resizable(true)
                 .default_size(340.0)
                 .min_size(220.0)
                 .show(ui, |ui| self.chat.ui(ui));
+            // Ajoutée après le chat : elle n'occupe que la largeur de la vidéo.
+            egui::Panel::bottom("barre_lecteur").show(ui, |ui| self.player_bar_ui(ui));
         }
         egui::CentralPanel::no_frame().show(ui, |ui| self.video_ui(ui));
     }
@@ -698,36 +801,6 @@ impl eframe::App for EvolveApp {
         self.session = None;
         self.save_config();
     }
-}
-
-/// Police système utilisée en secours pour les caractères absents de la police
-/// d'egui : braille (art ASCII du chat), flèches, symboles…
-const FALLBACK_FONT: &str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-
-fn install_fallback_font(ctx: &egui::Context) {
-    // Taille plafonnée : on ne charge pas en mémoire un fichier anormal.
-    let bytes = match fs::metadata(FALLBACK_FONT) {
-        Ok(meta) if meta.len() <= 4 * 1024 * 1024 => fs::read(FALLBACK_FONT).ok(),
-        _ => None,
-    };
-    let Some(bytes) = bytes else {
-        eprintln!("Police de secours absente ({FALLBACK_FONT}) : l'art ASCII peut mal s'afficher.");
-        return;
-    };
-    let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "dejavu".to_owned(),
-        std::sync::Arc::new(egui::FontData::from_owned(bytes)),
-    );
-    // En dernier : elle ne sert que si les autres polices n'ont pas le caractère.
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-        fonts
-            .families
-            .entry(family)
-            .or_default()
-            .push("dejavu".to_owned());
-    }
-    ctx.set_fonts(fonts);
 }
 
 /// Crée la fenêtre X11 enfant qui accueillera la vidéo, dans la fenêtre de l'application.

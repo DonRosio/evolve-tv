@@ -25,6 +25,8 @@ pub enum MpvEvent {
     /// Connexion IPC établie : canal d'écriture pour envoyer des commandes.
     Connected(UnixStream),
     Volume(f64),
+    /// Son coupé ou rétabli.
+    Mute(bool),
     /// Fin de lecture : `"eof"` (flux terminé), `"quit"` (fenêtre fermée), `"error"`…
     EndFile(String),
 }
@@ -203,7 +205,9 @@ fn ipc_loop(socket: &Path, on_event: impl Fn(MpvEvent)) {
         return;
     };
     let _ = writer.set_write_timeout(Some(Duration::from_secs(1)));
-    if send(&mut writer, json!(["observe_property", 1, "volume"])).is_err() {
+    if send(&mut writer, json!(["observe_property", 1, "volume"])).is_err()
+        || send(&mut writer, json!(["observe_property", 2, "mute"])).is_err()
+    {
         return;
     }
     on_event(MpvEvent::Connected(writer));
@@ -217,6 +221,11 @@ fn ipc_loop(socket: &Path, on_event: impl Fn(MpvEvent)) {
             Some("property-change") if message["name"] == "volume" => {
                 if let Some(volume) = message["data"].as_f64() {
                     on_event(MpvEvent::Volume(volume));
+                }
+            }
+            Some("property-change") if message["name"] == "mute" => {
+                if let Some(muted) = message["data"].as_bool() {
+                    on_event(MpvEvent::Mute(muted));
                 }
             }
             Some("end-file") => {
