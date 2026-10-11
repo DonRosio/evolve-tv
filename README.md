@@ -49,7 +49,7 @@ message d'origine). Les liens s'ouvrent après confirmation (le domaine réel es
 
 - **Messages enregistrés** : un clic envoie le message. Clic droit : l'insérer dans la
   saisie ou supprimer le bouton. « + » enregistre le texte de la saisie comme bouton.
-- **Emotes favorites** : clic = insérer dans la saisie ; clic droit ou Ctrl+clic = envoyer.
+- **Emotes favorites** : clic = envoyer ; clic droit = insérer dans la saisie.
 - **★ Emotes** : parcourir toutes les emotes (recherche) ; un clic ajoute ou retire une
   favorite, un clic droit l'insère.
 - Un message identique au précédent (moins de 30 s) reçoit un caractère invisible une

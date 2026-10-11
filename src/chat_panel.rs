@@ -661,16 +661,14 @@ impl ChatPanel {
                         None => ui.add(egui::Button::new(name.as_str()).small()),
                     };
                     let response = response.on_hover_text(format!(
-                        "{name}\nClic : insérer · clic droit ou Ctrl+clic : envoyer"
+                        "{name}\nClic : envoyer · clic droit : insérer dans la saisie"
                     ));
-                    let ctrl = ui.input(|i| i.modifiers.command);
-                    let send = response.secondary_clicked() || (response.clicked() && ctrl);
-                    if send && can_send {
+                    if response.clicked() && can_send {
                         outgoing = Some(Outgoing {
                             text: name.clone(),
                             reply_to: None,
                         });
-                    } else if response.clicked() {
+                    } else if response.secondary_clicked() {
                         insert = Some(name.clone());
                     }
                 }
@@ -867,6 +865,8 @@ impl ChatPanel {
         }
         let rect = frame
             .show(ui, |ui| {
+                // Fond (survol, premier message, mention) sur toute la largeur du chat.
+                ui.set_min_width(ui.available_width());
                 if *first {
                     ui.label(
                         RichText::new("Premier message")
