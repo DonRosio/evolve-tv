@@ -21,6 +21,7 @@ use crate::config::{Config, SavedMessage};
 use crate::emotes;
 use crate::helix::{self, BadgeImage};
 use crate::images::ImageCache;
+use crate::style;
 
 /// Twitch demande de revérifier le jeton toutes les heures.
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -80,6 +81,8 @@ pub struct ChatColumn {
     badges_for: Option<String>,
     /// Dernier chargement des emotes tierces (chaîne + instant).
     emotes_loaded: Option<(String, Instant)>,
+    /// En-tête du compte déplié (replié par défaut pour laisser la place au chat).
+    header_open: bool,
 
     panel: ChatPanel,
     images: ImageCache,
@@ -113,6 +116,7 @@ impl ChatColumn {
             room_id: None,
             badges_for: None,
             emotes_loaded: None,
+            header_open: false,
             panel,
             images: ImageCache::new(ctx),
         };
@@ -420,17 +424,44 @@ impl ChatColumn {
     // ---------- Interface ----------
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(6.0);
+        ui.add_space(4.0);
+        // Toujours déplié quand le compte demande une action (connexion, code à saisir…).
+        let needs_attention = matches!(
+            self.auth,
+            AuthState::LoggedOut | AuthState::Error(_) | AuthState::Device { .. }
+        );
+        let open = self.header_open || needs_attention;
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("Chat de {}", self.channel)).heading());
+            let caret = if open {
+                icon::CARET_DOWN
+            } else {
+                icon::CARET_RIGHT
+            };
+            if ui
+                .add(egui::Button::new(style::icon(caret)).frame(false))
+                .on_hover_text("Afficher / masquer le compte et les réglages du chat")
+                .clicked()
+            {
+                self.header_open = !self.header_open;
+            }
+            ui.label(RichText::new(format!("Chat de {}", self.channel)).strong());
+            if !open && let AuthState::LoggedIn(session) = &self.auth {
+                ui.label(RichText::new(&session.identity.login).small().weak());
+            }
         });
-        let mut action = self.account_ui(ui);
-        if ui
-            .small_button(format!("{} Actualiser les emotes", icon::ARROW_CLOCKWISE))
-            .on_hover_text("Recharge les emotes 7TV, BTTV et FFZ de la chaîne")
-            .clicked()
-        {
-            action = Some(Action::RefreshEmotes);
+        let mut action = None;
+        if open {
+            action = self.account_ui(ui);
+            if ui
+                .small_button(style::icon_label(
+                    icon::ARROW_CLOCKWISE,
+                    "Actualiser les emotes",
+                ))
+                .on_hover_text("Recharge les emotes 7TV, BTTV et FFZ de la chaîne")
+                .clicked()
+            {
+                action = Some(Action::RefreshEmotes);
+            }
         }
         ui.separator();
         if let Some(action) = action {
@@ -464,7 +495,7 @@ impl ChatColumn {
                     ui.colored_label(Color32::from_rgb(235, 70, 70), format!("Compte : {e}"));
                 }
                 if ui
-                    .button(format!("{} Se connecter à Twitch", icon::SIGN_IN))
+                    .button(style::icon_label(icon::SIGN_IN, "Se connecter à Twitch"))
                     .clicked()
                 {
                     action = Some(Action::Login);
@@ -495,7 +526,7 @@ impl ChatColumn {
                 ui.horizontal(|ui| {
                     ui.label(format!("Connecté : {}", session.identity.login));
                     if ui
-                        .small_button(format!("{} Se déconnecter", icon::SIGN_OUT))
+                        .small_button(style::icon_label(icon::SIGN_OUT, "Se déconnecter"))
                         .clicked()
                     {
                         action = Some(Action::Logout);

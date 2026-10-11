@@ -21,6 +21,7 @@ use crate::emote_picker::{self, Catalog, Picker};
 use crate::emotes::{Emote, EmoteMap, Provider};
 use crate::helix::BadgeImage;
 use crate::images::{ImageCache, Picture};
+use crate::style;
 
 /// Messages gardés en mémoire (les plus anciens sont oubliés).
 const MAX_LINES: usize = 300;
@@ -475,6 +476,8 @@ impl ChatPanel {
                 .id(id)
                 // Tab ne fait pas quitter le champ (il sert à l'autocomplétion).
                 .lock_focus(true)
+                // Un peu plus haut que par défaut, plus confortable.
+                .margin(egui::Margin::symmetric(8, 7))
                 .hint_text(hint)
                 .char_limit(500)
                 .desired_width(f32::INFINITY);
@@ -612,7 +615,7 @@ impl ChatPanel {
                 icon::CARET_DOWN
             };
             if ui
-                .small_button(arrow)
+                .small_button(style::icon(arrow))
                 .on_hover_text("Afficher / masquer les raccourcis")
                 .clicked()
             {
@@ -650,7 +653,7 @@ impl ChatPanel {
             let draft = self.input.trim();
             let can_save = config::is_valid_saved_text(draft) && self.saved_messages.len() < 50;
             if ui
-                .add_enabled(can_save, egui::Button::new(icon::PLUS))
+                .add_enabled(can_save, egui::Button::new(style::icon(icon::PLUS)))
                 .on_hover_text("Enregistrer le texte de la saisie comme bouton")
                 .clicked()
             {
@@ -696,9 +699,9 @@ impl ChatPanel {
                     }
                 }
                 let label = if self.picker.open {
-                    format!("{} Retour au chat", icon::ARROW_LEFT)
+                    style::icon_label(icon::ARROW_LEFT, "Retour au chat")
                 } else {
-                    format!("{} Emotes", icon::SMILEY)
+                    style::icon_label(icon::SMILEY, "Emotes")
                 };
                 if ui
                     .small_button(label)
@@ -762,7 +765,7 @@ impl ChatPanel {
                 egui::Frame::menu(ui.style()).show(ui, |ui| {
                     ui.set_min_width(170.0);
                     let item = |ui: &mut egui::Ui, glyph: &str, label: &str| {
-                        ui.add(egui::Button::new(format!("{glyph}  {label}")).frame(false))
+                        ui.add(egui::Button::new(style::icon_label(glyph, label)).frame(false))
                             .clicked()
                     };
                     if item(ui, icon::COPY, "Copier le message") {
@@ -1147,7 +1150,7 @@ impl ChatPanel {
                 button.center(),
                 egui::Align2::CENTER_CENTER,
                 glyph,
-                FontId::proportional(14.0),
+                style::icon_font(14.0),
                 Color32::WHITE,
             );
             if response.clicked() {

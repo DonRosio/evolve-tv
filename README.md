@@ -28,7 +28,8 @@ Mesurer la RAM (PSS, mpv et streamlink compris) pendant que l'application tourne
 | Touche | Action |
 |---|---|
 | Espace | Pause / reprise **au direct** (la reprise reconnecte mpv au direct) |
-| F ou F11 | Plein écran (Échap pour sortir) |
+| F11 | Plein écran de la fenêtre, mise en page conservée (avec T : vidéo + chat en immersion) |
+| F | Plein écran de la vidéo seule (Échap pour sortir) |
 | T | Mode théâtre : masque les barres du haut et du bas (Échap pour sortir) |
 | M | Couper / rétablir le son |
 | ↑ / ↓ | Volume ±5 |
@@ -160,3 +161,6 @@ Emojis : [Twemoji](https://github.com/jdecked/twemoji), © Twitter, Inc et contr
 licence [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 Icônes : [Phosphor](https://phosphoricons.com) (via la crate `egui-phosphor`), licence MIT.
+
+Police : [Inter](https://rsms.me/inter/) 4.1, © The Inter Project Authors, licence
+SIL Open Font License 1.1 (voir `assets/fonts/Inter-LICENSE.txt`).

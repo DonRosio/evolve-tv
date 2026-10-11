@@ -79,7 +79,10 @@ impl Picker {
                     .desired_width(140.0),
             );
             if ui
-                .button(format!("{} Fermer", egui_phosphor::regular::X))
+                .button(crate::style::icon_label(
+                    egui_phosphor::regular::X,
+                    "Fermer",
+                ))
                 .clicked()
             {
                 self.open = false;

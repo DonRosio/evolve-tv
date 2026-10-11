@@ -31,6 +31,19 @@ enum Event {
     Mpv(u64, MpvEvent),
 }
 
+/// Qualités Twitch habituelles, proposées quand la chaîne est hors ligne (la vraie
+/// liste n'est connue qu'au début du live). Une qualité absente est remplacée par
+/// la meilleure possible du profil.
+const TYPICAL_QUALITIES: [&str; 7] = [
+    "1080p60",
+    "720p60",
+    "720p30",
+    "480p30",
+    "360p30",
+    "160p30",
+    "audio_only",
+];
+
 /// En sortie vidéo `auto`, hauteur maximale affichée par Xv (au-delà : GPU).
 const XV_MAX_HEIGHT: u32 = 480;
 
@@ -87,7 +100,10 @@ pub struct EvolveApp {
     surface: Option<VideoSurface>,
     embed_error: Option<String>,
     detached: bool,
+    /// Plein écran « vidéo seule » (touche F).
     fullscreen: bool,
+    /// Fenêtre en plein écran sans rien masquer (touche F11).
+    window_fullscreen: bool,
     /// Mode théâtre : barres du haut et du bas masquées (vidéo + chat + contrôles).
     theater: bool,
     paused: bool,
@@ -146,6 +162,7 @@ impl EvolveApp {
             surface,
             embed_error,
             fullscreen: false,
+            window_fullscreen: false,
             theater: false,
             paused: false,
             muted: false,
@@ -416,8 +433,20 @@ impl EvolveApp {
             return;
         }
         self.fullscreen = !self.fullscreen;
+        self.apply_viewport_fullscreen();
+    }
+
+    /// F11 : la fenêtre passe en plein écran (sans barre de titre), la mise en page
+    /// reste la même (avec le mode théâtre : vidéo + chat + contrôles).
+    fn toggle_window_fullscreen(&mut self) {
+        self.window_fullscreen = !self.window_fullscreen;
+        self.apply_viewport_fullscreen();
+    }
+
+    fn apply_viewport_fullscreen(&self) {
+        let fullscreen = self.window_fullscreen || (self.fullscreen && !self.detached);
         self.ctx
-            .send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
+            .send_viewport_cmd(egui::ViewportCommand::Fullscreen(fullscreen));
     }
 
     fn toggle_pause(&mut self) {
@@ -470,9 +499,13 @@ impl EvolveApp {
         if pressed(Key::ArrowDown) {
             self.mpv_command(json!(["add", "volume", -5]));
         }
-        if pressed(Key::F11) || pressed(Key::F) || (pressed(Key::Escape) && self.fullscreen) {
+        // Échap sort d'abord du mode le plus « immersif ».
+        let escape = pressed(Key::Escape);
+        if pressed(Key::F) || (escape && self.fullscreen) {
             self.toggle_fullscreen();
-        } else if pressed(Key::T) || (pressed(Key::Escape) && self.theater) {
+        } else if pressed(Key::F11) || (escape && self.window_fullscreen) {
+            self.toggle_window_fullscreen();
+        } else if pressed(Key::T) || (escape && self.theater) {
             self.theater = !self.theater;
         }
     }
@@ -481,11 +514,8 @@ impl EvolveApp {
     fn controls_ui(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(format!("{} Evolve TV", icon::BROADCAST))
-                    .strong()
-                    .color(style::ACCENT),
-            );
+            ui.label(style::icon(icon::BROADCAST).color(style::ACCENT));
+            ui.label(RichText::new("Evolve TV").strong().color(style::ACCENT));
             ui.separator();
             ui.label(format!("Chaîne : {}", self.config.channel));
             ui.separator();
@@ -521,18 +551,42 @@ impl EvolveApp {
             "Auto (jusqu'à {})",
             self.config.profiles[self.profile].max_quality
         );
-        let mut quality = self.quality.clone();
-        egui::ComboBox::from_id_salt("qualite")
-            .selected_text(quality.clone().unwrap_or_else(|| auto.clone()))
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut quality, None, auto);
-                for q in &self.available {
-                    ui.selectable_value(&mut quality, Some(q.clone()), q.as_str());
-                }
-            })
-            .response
+        let selected = self.quality.clone().unwrap_or_else(|| auto.clone());
+        let button = ui
+            .button(style::label_icon(&selected, icon::CARET_UP))
             .on_hover_text("Qualité de la vidéo");
-        if quality != self.quality {
+        let offline = self.available.is_empty();
+        let mut choice = None;
+        // La barre étant en bas de la fenêtre, le menu s'ouvre toujours vers le haut.
+        egui::Popup::menu(&button)
+            .align(egui::RectAlign::TOP_START)
+            .show(|ui| {
+                ui.set_min_width(180.0);
+                if ui.selectable_label(self.quality.is_none(), &auto).clicked() {
+                    choice = Some(None);
+                }
+                if offline {
+                    ui.label(
+                        RichText::new("Hors ligne : qualités habituelles")
+                            .small()
+                            .weak(),
+                    );
+                }
+                let list: Vec<String> = if offline {
+                    TYPICAL_QUALITIES.iter().map(|q| (*q).to_owned()).collect()
+                } else {
+                    self.available.clone()
+                };
+                for q in list {
+                    let is_selected = self.quality.as_deref() == Some(q.as_str());
+                    if ui.selectable_label(is_selected, &q).clicked() {
+                        choice = Some(Some(q));
+                    }
+                }
+            });
+        if let Some(quality) = choice
+            && quality != self.quality
+        {
             self.quality = quality;
             if self.session.is_some() {
                 self.start();
@@ -542,7 +596,7 @@ impl EvolveApp {
 
     /// Barre de contrôles sous la vidéo.
     fn player_bar_ui(&mut self, ui: &mut egui::Ui) {
-        let big = |text: &str| RichText::new(text).size(18.0);
+        let big = |glyph: &str| style::icon(glyph).size(18.0);
         let playing = self.session.as_ref().is_some_and(|s| s.mpv.is_some());
         ui.add_space(3.0);
         ui.horizontal(|ui| {
@@ -601,17 +655,20 @@ impl EvolveApp {
             self.quality_ui(ui);
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let (fullscreen_icon, fullscreen_tip) = if self.fullscreen {
-                    (icon::CORNERS_IN, "Quitter le plein écran (F / Échap)")
+                let (fullscreen_icon, fullscreen_tip) = if self.window_fullscreen {
+                    (icon::CORNERS_IN, "Quitter le plein écran (F11 / Échap)")
                 } else {
-                    (icon::CORNERS_OUT, "Plein écran (F)")
+                    (
+                        icon::CORNERS_OUT,
+                        "Plein écran avec le chat (F11) · vidéo seule : F",
+                    )
                 };
                 if ui
                     .button(big(fullscreen_icon))
                     .on_hover_text(fullscreen_tip)
                     .clicked()
                 {
-                    self.toggle_fullscreen();
+                    self.toggle_window_fullscreen();
                 }
                 let (detach_icon, detach_tip) = if self.detached {
                     (icon::ARROW_SQUARE_IN, "Rattacher la vidéo à la fenêtre")
@@ -740,7 +797,9 @@ impl EvolveApp {
                 Status::Playing if self.detached => {
                     "Vidéo détachée dans sa propre fenêtre".to_owned()
                 }
-                Status::Stopped => format!("Clique sur {} pour regarder le stream", icon::PLAY),
+                Status::Stopped => {
+                    "Clique sur le bouton lecture pour regarder le stream".to_owned()
+                }
                 Status::Connecting => "Connexion à Twitch…".to_owned(),
                 Status::Offline => format!(
                     "{} est hors ligne\nLe stream se lancera tout seul au début du live",
