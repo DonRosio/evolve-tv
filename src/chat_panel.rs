@@ -609,13 +609,14 @@ impl ChatPanel {
         let mut remove: Option<usize> = None;
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            let arrow = if self.bar_collapsed {
-                icon::CARET_RIGHT
+            let toggle = if self.bar_collapsed {
+                // Repliée : petite flèche, inchangée.
+                ui.small_button(style::icon(icon::CARET_RIGHT))
             } else {
-                icon::CARET_DOWN
+                // Dépliée : même hauteur que les boutons à côté.
+                ui.add(egui::Button::new(style::icon(icon::CARET_DOWN)))
             };
-            if ui
-                .small_button(style::icon(arrow))
+            if toggle
                 .on_hover_text("Afficher / masquer les raccourcis")
                 .clicked()
             {
@@ -699,12 +700,13 @@ impl ChatPanel {
                     }
                 }
                 let label = if self.picker.open {
-                    style::icon_label(icon::ARROW_LEFT, "Retour au chat")
+                    "Retour au chat"
                 } else {
-                    style::icon_label(icon::SMILEY, "Emotes")
+                    "Emotes"
                 };
+                // Même hauteur (28 px) que les emotes favorites à côté.
                 if ui
-                    .small_button(label)
+                    .add(egui::Button::new(label).min_size(egui::vec2(0.0, 28.0)))
                     .on_hover_text("Parcourir toutes les emotes et choisir tes favorites")
                     .clicked()
                 {
@@ -956,36 +958,30 @@ impl ChatPanel {
                             .weak(),
                         );
                     }
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing.x = 0.0;
-                        for badge in badges {
-                            let Some(info) = self.badges.get(badge) else {
-                                continue;
-                            };
-                            if let Some(picture) = images.get(&info.url) {
-                                let frame = picture.frame_at(time, false);
-                                let (rect, response) =
-                                    ui.allocate_exact_size(Vec2::splat(BADGE_SIZE), Sense::hover());
-                                ui.painter()
-                                    .image(frame.texture, rect, frame.uv, Color32::WHITE);
-                                response.on_hover_text(&info.title);
-                                ui.add_space(3.0);
+                    if art && !line.deleted {
+                        // Pseudo et premier dessin partagent le même haut ; le reste du
+                        // dessin s'aligne dessous, sous le pseudo.
+                        ui.horizontal_top(|ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            self.header_ui(ui, badges, name, color, action, images, time);
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                self.segments_ui(
+                                    ui, segments, color, action, true, images, time, out,
+                                );
+                            });
+                        });
+                    } else {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            self.header_ui(ui, badges, name, color, action, images, time);
+                            if line.deleted {
+                                ui.label(RichText::new("<message supprimé>").italics().weak());
+                                return;
                             }
-                        }
-                        ui.label(RichText::new(name).color(color).strong());
-                        ui.label(if action { " " } else { ": " });
-                        if line.deleted {
-                            ui.label(RichText::new("<message supprimé>").italics().weak());
-                            return;
-                        }
-                        if art {
-                            // Art ASCII : chaque « mot » est une ligne du dessin, collées
-                            // les unes aux autres.
-                            ui.spacing_mut().item_spacing.y = 0.0;
-                            ui.end_row();
-                        }
-                        self.segments_ui(ui, segments, color, action, art, images, time, out);
-                    });
+                            self.segments_ui(ui, segments, color, action, false, images, time, out);
+                        });
+                    }
                 });
             })
             .response
@@ -1032,7 +1028,6 @@ impl ChatPanel {
                 Segment::Text(text) if art => {
                     for row in text.split(' ').filter(|r| !r.is_empty()) {
                         ui.add(egui::Label::new(row).wrap_mode(egui::TextWrapMode::Extend));
-                        ui.end_row();
                     }
                 }
                 Segment::Text(text) => {
@@ -1107,6 +1102,36 @@ impl ChatPanel {
                 },
             }
         }
+    }
+
+    /// Badges, pseudo et deux-points, dans le même alignement que le texte du message.
+    #[allow(clippy::too_many_arguments)]
+    fn header_ui(
+        &self,
+        ui: &mut egui::Ui,
+        badges: &[Badge],
+        name: &str,
+        color: Color32,
+        action: bool,
+        images: &mut ImageCache,
+        time: f64,
+    ) {
+        for badge in badges {
+            let Some(info) = self.badges.get(badge) else {
+                continue;
+            };
+            if let Some(picture) = images.get(&info.url) {
+                let frame = picture.frame_at(time, false);
+                let (rect, response) =
+                    ui.allocate_exact_size(Vec2::splat(BADGE_SIZE), Sense::hover());
+                ui.painter()
+                    .image(frame.texture, rect, frame.uv, Color32::WHITE);
+                response.on_hover_text(&info.title);
+                ui.add_space(3.0);
+            }
+        }
+        ui.label(RichText::new(name).color(color).strong());
+        ui.label(if action { " " } else { ": " });
     }
 
     /// Boutons « Copier » et « Répondre » en haut à droite du message survolé.
