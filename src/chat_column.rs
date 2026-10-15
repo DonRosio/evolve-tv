@@ -1,7 +1,7 @@
-//! Colonne de droite : connexion au compte Twitch + chat.
+//! Right-hand column: Twitch account login + chat.
 //!
-//! Elle orchestre les threads de fond (vérification du jeton, connexion par code,
-//! chat IRC, API Twitch) et reçoit leurs résultats par un canal, comme `app.rs`.
+//! It orchestrates the background threads (token check, login by code,
+//! IRC chat, Twitch API) and receives their results through a channel, like `app.rs`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,12 +23,12 @@ use crate::helix::{self, BadgeImage};
 use crate::images::ImageCache;
 use crate::style;
 
-/// Twitch demande de revérifier le jeton toutes les heures.
+/// Twitch asks for the token to be checked again every hour.
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
-/// Rechargement des emotes 7TV/BTTV/FFZ (une emote ajoutée par la chaîne apparaît ainsi).
+/// Reloading the 7TV/BTTV/FFZ emotes (so an emote added by the channel shows up).
 const EMOTES_REFRESH: Duration = Duration::from_secs(30 * 60);
-/// Pas de rechargement plus fréquent que ça (ex. reconnexions en série).
+/// No reload more frequent than that (e.g. serial reconnections).
 const EMOTES_MIN_INTERVAL: Duration = Duration::from_secs(60);
 
 enum Msg {
@@ -42,7 +42,7 @@ enum Msg {
 }
 
 enum AuthState {
-    /// Pas d'identifiant d'application dans la config : lecture seule.
+    /// No application identifier in the config: read-only.
     NoClientId,
     Checking,
     LoggedOut,
@@ -54,8 +54,8 @@ enum AuthState {
     Error(String),
 }
 
-/// Action demandée par un bouton (appliquée après le dessin, pour ne pas
-/// modifier l'état pendant qu'on le lit).
+/// Action requested by a button (applied after drawing, so as not to
+/// modify the state while it is being read).
 enum Action {
     Login,
     CancelLogin,
@@ -79,9 +79,9 @@ pub struct ChatColumn {
     login: SharedLogin,
     room_id: Option<String>,
     badges_for: Option<String>,
-    /// Dernier chargement des emotes tierces (chaîne + instant).
+    /// Last loading of the third-party emotes (channel + instant).
     emotes_loaded: Option<(String, Instant)>,
-    /// En-tête du compte déplié (replié par défaut pour laisser la place au chat).
+    /// Account header expanded (collapsed by default to leave room for the chat).
     header_open: bool,
 
     panel: ChatPanel,
@@ -121,19 +121,19 @@ impl ChatColumn {
             images: ImageCache::new(ctx),
         };
         match column.client_id.clone() {
-            // Relit le trousseau ; le chat démarre quand on sait si on est connecté.
+            // Reads the keyring again; the chat starts once we know whether we are logged in.
             Some(client_id) => column.spawn(move || Msg::Auth(auth::restore(&client_id))),
             None => column.restart_chat(),
         }
         column
     }
 
-    /// Messages enregistrés et favorites modifiés depuis l'interface (à enregistrer).
+    /// Saved messages and favourites modified from the interface (to be saved).
     pub fn take_shortcuts_change(&mut self) -> Option<(Vec<SavedMessage>, Vec<String>)> {
         self.panel.take_shortcuts_change()
     }
 
-    /// Lance `job` dans un thread et renvoie son résultat à l'interface.
+    /// Runs `job` in a thread and sends its result back to the interface.
     fn spawn(&self, job: impl FnOnce() -> Msg + Send + 'static) {
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         thread::spawn(move || {
@@ -150,7 +150,7 @@ impl ChatColumn {
             let _ = tx.send(Msg::Chat(id, event));
             ctx.request_repaint();
         });
-        // Remplacer l'ancienne poignée arrête l'ancienne connexion.
+        // Replacing the old handle stops the old connection.
         self.chat = Some((id, chat));
     }
 
@@ -160,9 +160,9 @@ impl ChatColumn {
         }
     }
 
-    // ---------- Événements ----------
+    // ---------- Events ----------
 
-    /// À appeler à chaque image, avant le dessin.
+    /// To be called at every frame, before drawing.
     pub fn logic(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             self.handle(msg);
@@ -193,7 +193,7 @@ impl ChatColumn {
         }
     }
 
-    /// Charge les emotes 7TV/BTTV/FFZ de la chaîne (sauf si c'est tout récent).
+    /// Loads the channel's 7TV/BTTV/FFZ emotes (unless it was very recent).
     fn load_emotes(&mut self, force: bool) {
         let Some(room) = self.room_id.clone() else {
             return;
@@ -275,7 +275,7 @@ impl ChatColumn {
                 let token = session.tokens.access_token.clone();
                 self.auth = AuthState::LoggedIn(session);
                 if same_account {
-                    return; // simple renouvellement du jeton : le chat continue
+                    return; // simple token renewal: the chat continues
                 }
                 self.last_login = Instant::now();
                 self.panel.set_me(Some(identity.login.clone()));
@@ -297,7 +297,7 @@ impl ChatColumn {
             }
             Outcome::Failed(error) => {
                 self.next_check = Instant::now() + RETRY_INTERVAL;
-                // Connecté : on garde la session (souvent une coupure réseau passagère).
+                // Logged in: we keep the session (often a passing network interruption).
                 if !matches!(self.auth, AuthState::LoggedIn(_)) {
                     self.auth = AuthState::Error(error);
                     if self.chat.is_none() {
@@ -334,15 +334,15 @@ impl ChatColumn {
             ChatEvent::Clear(target) => self.panel.clear(target),
             ChatEvent::RoomId(id) => {
                 self.room_id = Some(id);
-                // À chaque (re)connexion au chat.
+                // At every (re)connection to the chat.
                 self.load_emotes(false);
             }
             ChatEvent::AuthFailed => self.on_chat_auth_failed(),
         }
     }
 
-    /// Twitch refuse notre jeton pour le chat : on tente un renouvellement, sauf si
-    /// on vient d'en obtenir un (sinon on boucle) : retour en lecture seule.
+    /// Twitch refuses our token for the chat: we try a renewal, unless
+    /// we just got one (otherwise we loop): back to read-only.
     fn on_chat_auth_failed(&mut self) {
         let (AuthState::LoggedIn(session), Some(client_id)) = (&self.auth, self.client_id.clone())
         else {
@@ -425,7 +425,7 @@ impl ChatColumn {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
-        // Toujours déplié quand le compte demande une action (connexion, code à saisir…).
+        // Always expanded when the account asks for an action (login, code to enter…).
         let needs_attention = matches!(
             self.auth,
             AuthState::LoggedOut | AuthState::Error(_) | AuthState::Device { .. }
@@ -538,7 +538,7 @@ impl ChatColumn {
     }
 }
 
-/// Connexion par code (Device Code Flow), exécutée dans un thread.
+/// Login by code (Device Code Flow), run in a thread.
 fn device_flow(client_id: &str, cancel: &AtomicBool, tx: &Sender<Msg>, ctx: &egui::Context) -> Msg {
     let code = match auth::start_device_flow(client_id) {
         Ok(code) => code,
@@ -554,7 +554,7 @@ fn device_flow(client_id: &str, cancel: &AtomicBool, tx: &Sender<Msg>, ctx: &egu
     let deadline = Instant::now() + Duration::from_secs(code.expires_in.min(30 * 60));
     let mut interval = Duration::from_secs(code.interval.clamp(1, 30));
     while Instant::now() < deadline {
-        // Attente découpée en petits pas pour réagir vite à « Annuler ».
+        // Waiting split into small steps to react quickly to "Cancel".
         let wake = Instant::now() + interval;
         while Instant::now() < wake {
             if cancel.load(Ordering::Relaxed) {
@@ -578,9 +578,9 @@ fn device_flow(client_id: &str, cancel: &AtomicBool, tx: &Sender<Msg>, ctx: &egu
     Msg::DeviceFailed("code expiré".into())
 }
 
-/// Ouvre la page de validation de Twitch dans le navigateur par défaut.
+/// Opens Twitch's validation page in the default browser.
 fn open_in_browser(url: &str) {
-    // Uniquement la page officielle de Twitch, jamais une adresse arbitraire.
+    // Only Twitch's official page, never an arbitrary address.
     if !url.starts_with("https://www.twitch.tv/activate") {
         return;
     }

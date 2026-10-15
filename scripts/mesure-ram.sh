@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Mesure la mémoire réellement utilisée par Evolve TV et ses processus enfants
+# Measures the memory actually used by Evolve TV and its child processes
 # (streamlink, mpv).
 #
-# - « RAM » : PSS (la mémoire partagée est répartie équitablement entre les processus).
-# - « swap » : part déplacée dans le swap (zram compressé sur ce PC) quand la RAM manque.
-#   Sans cette colonne, la mesure paraît plus basse qu'elle ne l'est.
+# - "RAM": PSS (shared memory is split fairly between the processes).
+# - "swap": part moved to swap (compressed zram on this PC) when RAM runs short.
+#   Without this column, the measurement looks lower than it is.
 set -euo pipefail
 
 app=$(pgrep -n -x evolve-tv) || { echo "Evolve TV n'est pas lancé."; exit 1; }

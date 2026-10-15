@@ -1,4 +1,4 @@
-//! Configuration de l'application, stockée en JSON dans `~/.config/evolve-tv/config.json`.
+//! Application configuration, stored as JSON in `~/.config/evolve-tv/config.json`.
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -10,45 +10,45 @@ use serde::{Deserialize, Serialize};
 use crate::{paths, streamlink};
 
 const FILE_NAME: &str = "config.json";
-/// Au-delà, le fichier est forcément anormal : on refuse de le lire.
+/// Beyond that, the file is necessarily abnormal: we refuse to read it.
 const MAX_FILE_SIZE: u64 = 1024 * 1024;
 
-// `#[derive(Serialize, Deserialize)]` génère automatiquement la conversion JSON ⇄ struct.
-// `default` : un champ absent du fichier prend sa valeur par défaut.
-// `deny_unknown_fields` : un champ mal orthographié provoque une erreur claire
-// au lieu d'être ignoré en silence.
+// `#[derive(Serialize, Deserialize)]` automatically generates the JSON ⇄ struct conversion.
+// `default`: a field missing from the file takes its default value.
+// `deny_unknown_fields`: a misspelt field causes a clear error
+// instead of being silently ignored.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// Chaîne Twitch à regarder.
+    /// Twitch channel to watch.
     pub channel: String,
-    /// Lancer le stream dès l'ouverture de l'application.
+    /// Start the stream as soon as the application opens.
     pub autostart: bool,
-    /// Profil utilisé quand le réseau actuel n'est associé à aucun profil.
+    /// Profile used when the current network is not associated with any profile.
     pub default_profile: String,
     pub profiles: Vec<Profile>,
     pub player: Player,
-    /// Identifiant de l'application enregistrée sur dev.twitch.tv (type « Public »).
-    /// Ce n'est pas un secret : Twitch le voit à chaque requête.
+    /// Identifier of the application registered on dev.twitch.tv ("Public" type).
+    /// It is not a secret: Twitch sees it on every request.
     pub twitch_client_id: Option<String>,
-    /// Emotes animées dans le chat (`false` : images fixes, moins de CPU).
+    /// Animated emotes in the chat (`false`: still images, less CPU).
     pub animated_emotes: bool,
-    /// Boutons qui envoient un message en un clic.
+    /// Buttons that send a message in one click.
     pub saved_messages: Vec<SavedMessage>,
-    /// Noms des emotes favorites (barre sous la saisie du chat).
+    /// Names of the favourite emotes (bar under the chat input).
     pub favorite_emotes: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedMessage {
-    /// Texte du bouton (par défaut : le début du message).
+    /// Button text (default: the beginning of the message).
     #[serde(default)]
     pub label: Option<String>,
     pub text: String,
 }
 
-/// Limites (Twitch refuse les messages de plus de 500 caractères).
+/// Limits (Twitch refuses messages of more than 500 characters).
 pub const MAX_MESSAGE_CHARS: usize = 500;
 const MAX_LABEL_CHARS: usize = 40;
 const MAX_SAVED_MESSAGES: usize = 50;
@@ -58,10 +58,10 @@ const MAX_FAVORITES: usize = 200;
 #[serde(deny_unknown_fields)]
 pub struct Profile {
     pub name: String,
-    /// Qualité maximale (`480p`, `1080p60`…) : on prend la meilleure qualité disponible
-    /// sans dépasser celle-ci (voir `streamlink::candidates_up_to`).
+    /// Maximum quality (`480p`, `1080p60`…): the best available quality is taken
+    /// without exceeding this one (see `streamlink::candidates_up_to`).
     pub max_quality: String,
-    /// Réseaux Wi-Fi (SSID) qui activent automatiquement ce profil.
+    /// Wi-Fi networks (SSID) that automatically activate this profile.
     #[serde(default)]
     pub wifi_networks: Vec<String>,
 }
@@ -69,25 +69,25 @@ pub struct Profile {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Player {
-    /// Volume de 0 à 100, mémorisé entre deux lancements.
+    /// Volume from 0 to 100, remembered between two launches.
     pub volume: u8,
-    /// Sortie vidéo de mpv : `auto`, `xv` ou `gpu` (voir `VideoOutput`).
+    /// mpv's video output: `auto`, `xv` or `gpu` (see `VideoOutput`).
     pub video_output: VideoOutput,
-    /// En sortie `gpu` : décodage par la carte graphique (moins de CPU et de batterie).
+    /// With the `gpu` output: decoding by the graphics card (less CPU and battery).
     pub hardware_decoding: bool,
-    /// Chemins imposés des programmes (sinon recherche automatique).
+    /// Imposed paths of the programs (otherwise automatic lookup).
     pub streamlink_path: Option<PathBuf>,
     pub mpv_path: Option<PathBuf>,
 }
 
-/// Comment mpv affiche la vidéo. Mesures sur le PC de développement (GTX 960M) :
-/// Xv ≈ 87 Mo en 480p mais décode avec le processeur (115 % d'un cœur en 1080p60) ;
-/// GPU ≈ 190-200 Mo mais quasiment sans CPU.
-// `rename_all = "lowercase"` : dans le JSON, on écrit "auto", "xv" ou "gpu".
+/// How mpv displays the video. Measurements on the development PC (GTX 960M):
+/// Xv ≈ 87 MB at 480p but decodes with the processor (115 % of a core at 1080p60);
+/// GPU ≈ 190-200 MB but almost no CPU.
+// `rename_all = "lowercase"`: in the JSON, one writes "auto", "xv" or "gpu".
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VideoOutput {
-    /// Xv jusqu'à 480p, GPU au-dessus.
+    /// Xv up to 480p, GPU above.
     #[default]
     Auto,
     Xv,
@@ -149,7 +149,7 @@ impl Config {
             .ok_or_else(|| "impossible de trouver le dossier de configuration (HOME absent)".into())
     }
 
-    /// Lit la configuration, ou crée le fichier avec les valeurs par défaut s'il n'existe pas.
+    /// Reads the configuration, or creates the file with the default values if it does not exist.
     pub fn load() -> Result<Config, String> {
         let path = Config::path()?;
         if !path.exists() {
@@ -172,8 +172,8 @@ impl Config {
         Ok(config)
     }
 
-    /// Écrit la configuration de façon atomique (fichier temporaire puis renommage) :
-    /// une coupure pendant l'écriture ne peut pas laisser un fichier à moitié écrit.
+    /// Writes the configuration atomically (temporary file then rename):
+    /// an interruption during the write cannot leave a half-written file.
     pub fn save(&self) -> Result<(), String> {
         let path = Config::path()?;
         let dir = path.parent().ok_or("chemin de configuration invalide")?;
@@ -184,7 +184,7 @@ impl Config {
         let tmp = path.with_extension("json.tmp");
         let _ = fs::remove_file(&tmp);
         let write = || -> std::io::Result<()> {
-            // Droits 0600 : seul l'utilisateur peut lire ou modifier le fichier.
+            // 0600 permissions: only the user can read or modify the file.
             let mut file = OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -264,7 +264,7 @@ impl Config {
         Ok(())
     }
 
-    /// Index du profil à utiliser pour le réseau Wi-Fi donné.
+    /// Index of the profile to use for the given Wi-Fi network.
     pub fn profile_for_network(&self, ssid: Option<&str>) -> usize {
         let by_network = ssid.and_then(|ssid| {
             self.profiles
@@ -281,25 +281,25 @@ impl Config {
     }
 }
 
-/// Texte de message enregistré : non vide, 500 caractères max, sans caractère de contrôle.
+/// Saved message text: non-empty, 500 characters max, no control characters.
 pub fn is_valid_saved_text(text: &str) -> bool {
     !text.trim().is_empty()
         && text.chars().count() <= MAX_MESSAGE_CHARS
         && !text.chars().any(char::is_control)
 }
 
-/// Un nom d'emote est un mot (sans espace), de longueur raisonnable.
+/// An emote name is a word (no space) of reasonable length.
 pub fn is_valid_emote_name(name: &str) -> bool {
     (1..=100).contains(&name.chars().count()) && !name.chars().any(char::is_whitespace)
 }
 
-/// Un nom de chaîne Twitch ne contient que lettres, chiffres et `_` (25 caractères max).
-/// Le vérifier empêche aussi qu'un nom comme `--option` soit interprété par streamlink.
+/// A Twitch channel name only contains letters, digits and `_` (25 characters max).
+/// Checking it also prevents a name like `--option` from being interpreted by streamlink.
 pub fn is_valid_channel(name: &str) -> bool {
     (1..=25).contains(&name.len()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// Une qualité streamlink : `480p`, `1080p60`, `audio_only`, `best`…
+/// A streamlink quality: `480p`, `1080p60`, `audio_only`, `best`…
 pub fn is_valid_quality(name: &str) -> bool {
     (1..=20).contains(&name.len())
         && name
@@ -334,7 +334,7 @@ mod tests {
         config.favorite_emotes.push("deux mots".into());
         assert!(config.validate().is_err());
 
-        // Une config écrite avant l'étape 4 (sans ces champs) reste lisible.
+        // A config written before step 4 (without these fields) stays readable.
         let old: Config = serde_json::from_str(r#"{"channel":"somechannel"}"#).unwrap();
         assert_eq!(old.saved_messages.len(), 2);
     }

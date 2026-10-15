@@ -1,11 +1,11 @@
-//! Ouverture d'adresses web dans le navigateur par défaut (via `xdg-open`).
+//! Opening web addresses in the default browser (through `xdg-open`).
 
 use std::process::{Command, Stdio};
 use std::thread;
 
 use crate::paths;
 
-/// Adresse web acceptable : `http(s)://`, sans espace ni caractère de contrôle.
+/// Acceptable web address: `http(s)://`, without spaces or control characters.
 pub fn is_web_url(url: &str) -> bool {
     (url.starts_with("https://") || url.starts_with("http://"))
         && url.len() > "https://".len()
@@ -13,16 +13,16 @@ pub fn is_web_url(url: &str) -> bool {
         && !url.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
-/// Domaine réel d'une adresse, affiché avant d'ouvrir un lien.
-/// `https://twitch.tv@piege.com/x` → `piege.com` (tout ce qui précède `@` est ignoré
-/// par le navigateur : une astuce classique de lien piégé).
+/// Real domain of an address, shown before opening a link.
+/// `https://twitch.tv@trap.com/x` → `trap.com` (everything before `@` is ignored
+/// by the browser: a classic booby-trapped link trick).
 pub fn domain(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
     authority.rsplit('@').next().unwrap_or(authority)
 }
 
-/// Ouvre l'adresse dans le navigateur. Les adresses non web sont ignorées.
+/// Opens the address in the browser. Non-web addresses are ignored.
 pub fn open(url: &str) {
     if !is_web_url(url) {
         return;
@@ -37,7 +37,7 @@ pub fn open(url: &str) {
         .stderr(Stdio::null())
         .spawn();
     if let Ok(mut child) = child {
-        // Récupère le statut de fin pour ne pas laisser de processus « zombie ».
+        // Collects the exit status so as not to leave a "zombie" process.
         thread::spawn(move || child.wait());
     }
 }

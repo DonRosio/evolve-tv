@@ -1,8 +1,8 @@
-//! Fenêtre X11 « enfant » posée dans la fenêtre egui : mpv y dessine la vidéo (`--wid`).
+//! "Child" X11 window placed in the egui window: mpv draws the video in it (`--wid`).
 //!
-//! Sous X11, une fenêtre peut en contenir d'autres. On crée un rectangle noir à
-//! l'intérieur de notre fenêtre, on donne son identifiant à mpv, et on le déplace
-//! ou le redimensionne pour qu'il suive la zone vidéo de l'interface.
+//! Under X11, a window can contain others. We create a black rectangle inside
+//! our window, give its identifier to mpv, and move
+//! or resize it so that it follows the interface's video area.
 
 use x11rb::COPY_DEPTH_FROM_PARENT;
 use x11rb::connection::Connection;
@@ -21,7 +21,7 @@ fn err(e: impl std::fmt::Display) -> String {
 }
 
 impl VideoSurface {
-    /// Crée la fenêtre enfant (cachée) dans la fenêtre `parent`.
+    /// Creates the child window (hidden) in the `parent` window.
     pub fn new(parent: u32) -> Result<VideoSurface, String> {
         let (conn, screen) = x11rb::connect(None).map_err(err)?;
         let black = conn
@@ -54,12 +54,12 @@ impl VideoSurface {
         })
     }
 
-    /// Identifiant X11 de la fenêtre, à transmettre à mpv.
+    /// X11 identifier of the window, to hand to mpv.
     pub fn id(&self) -> u32 {
         self.window
     }
 
-    /// Place la fenêtre (en pixels physiques, relativement à la fenêtre principale) et l'affiche.
+    /// Places the window (in physical pixels, relative to the main window) and shows it.
     pub fn show_at(&mut self, x: i32, y: i32, width: u32, height: u32) -> Result<(), String> {
         let geometry = (x, y, width.max(1), height.max(1));
         if self.geometry != Some(geometry) {
@@ -88,8 +88,8 @@ impl VideoSurface {
 
     fn flush(&self) -> Result<(), String> {
         self.conn.flush().map_err(err)?;
-        // Vide la file des événements/erreurs X11 qu'on n'utilise pas, pour qu'elle
-        // ne grossisse pas indéfiniment.
+        // Empties the queue of X11 events/errors that we do not use, so that it
+        // does not grow indefinitely.
         while let Ok(Some(_)) = self.conn.poll_for_event() {}
         Ok(())
     }

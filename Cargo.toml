@@ -2,6 +2,7 @@
 name = "evolve-tv"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 eframe = { version = "0.36.2", default-features = false, features = ["glow", "x11", "default_fonts"] }
@@ -17,7 +18,7 @@ webpki-roots = "1"
 x11rb = "0.13"
 zbus-secret-service-keyring-store = { version = "1", features = ["rt-async-io-crypto-rust"] }
 
-# Profil de compilation optimisé pour un binaire petit et économe en RAM.
+# Build profile optimised for a small, RAM-frugal binary.
 [profile.release]
 opt-level = 3       # optimisation maximale de la vitesse
 lto = true          # optimisation sur l'ensemble du programme (binaire plus petit)

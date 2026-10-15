@@ -1,4 +1,4 @@
-//! Icône de la fenêtre (fichier hors du dépôt git, voir .gitignore).
+//! Window icon (a file kept out of the git repository, see .gitignore).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,8 +10,8 @@ use crate::paths;
 
 const MAX_FILE_SIZE: u64 = 2 * 1024 * 1024;
 
-/// Cherche `~/.local/share/evolve-tv/icon.png`, puis `assets/icon.png` du projet.
-/// Sans icône, l'application fonctionne normalement.
+/// Looks for `~/.local/share/evolve-tv/icon.png`, then the project's `assets/icon.png`.
+/// Without an icon, the application works normally.
 pub fn load() -> Option<IconData> {
     let candidates = [
         paths::data_dir().map(|dir| dir.join("icon.png")),
@@ -38,8 +38,8 @@ fn decode(path: &Path) -> Result<IconData, String> {
     }
     let mut reader = ImageReader::open(path).map_err(|e| e.to_string())?;
     reader.set_format(ImageFormat::Png);
-    // Limites contre les images piégées (« bombes de décompression ») :
-    // un petit fichier qui prétendrait faire 50 000 × 50 000 pixels.
+    // Limits against booby-trapped images ("decompression bombs"):
+    // a small file that claims to be 50,000 × 50,000 pixels.
     let mut limits = Limits::default();
     limits.max_image_width = Some(1024);
     limits.max_image_height = Some(1024);

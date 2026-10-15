@@ -1,4 +1,4 @@
-//! Client HTTPS partagé : HTTPS obligatoire, délais d'attente, taille des réponses limitée.
+//! Shared HTTPS client: HTTPS mandatory, timeouts, response size limited.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -6,17 +6,17 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use ureq::{Agent, Body, http::Response};
 
-/// Taille maximale acceptée pour une réponse JSON de l'API Twitch.
+/// Maximum size accepted for a JSON response from the Twitch API.
 const MAX_JSON: u64 = 8 * 1024 * 1024;
 
-/// Agent HTTP unique (il garde les connexions ouvertes pour les réutiliser).
+/// Single HTTP agent (it keeps connections open to reuse them).
 pub fn agent() -> &'static Agent {
-    // `OnceLock` : créé au premier appel, puis partagé entre tous les threads.
+    // `OnceLock`: created at the first call, then shared between all the threads.
     static AGENT: OnceLock<Agent> = OnceLock::new();
     AGENT.get_or_init(|| {
         Agent::config_builder()
             .https_only(true)
-            // Les codes 4xx/5xx sont traités par notre code (ex. « autorisation en attente »).
+            // 4xx/5xx codes are handled by our code (e.g. "authorization pending").
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(20)))
             .max_redirects(3)
@@ -35,7 +35,7 @@ pub fn read_json<T: DeserializeOwned>(response: &mut Response<Body>) -> Result<T
         .map_err(|e| format!("réponse illisible : {e}"))
 }
 
-/// Télécharge au plus `limit` octets.
+/// Downloads at most `limit` bytes.
 pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>, String> {
     let mut response = agent().get(url).call().map_err(|e| e.to_string())?;
     if !response.status().is_success() {

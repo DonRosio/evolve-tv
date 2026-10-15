@@ -1,13 +1,13 @@
-//! Analyse des lignes IRC de Twitch (format IRCv3 avec « tags »).
+//! Parsing Twitch's IRC lines (IRCv3 format with "tags").
 //!
-//! Exemple de ligne reçue :
+//! Example of a received line:
 //! `@color=#FF0000;display-name=Bob;emotes=25:0-4 :bob!bob@bob.tmi.twitch.tv PRIVMSG #somechannel :Kappa salut`
 
 use std::collections::HashMap;
 
 pub struct IrcMessage {
     pub tags: HashMap<String, String>,
-    /// Pseudo de l'expéditeur (`bob` dans `bob!bob@bob.tmi.twitch.tv`).
+    /// Sender's nickname (`bob` in `bob!bob@bob.tmi.twitch.tv`).
     pub nick: Option<String>,
     pub command: String,
     pub params: Vec<String>,
@@ -18,7 +18,7 @@ impl IrcMessage {
         self.tags.get(key).map_or("", String::as_str)
     }
 
-    /// Dernier paramètre (le texte du message, en général).
+    /// Last parameter (the message text, in general).
     pub fn trailing(&self) -> &str {
         self.params.last().map_or("", String::as_str)
     }
@@ -71,7 +71,7 @@ pub fn parse(line: &str) -> Option<IrcMessage> {
     })
 }
 
-/// Les valeurs de tags échappent certains caractères (`\s` = espace, `\:` = `;`…).
+/// Tag values escape some characters (`\s` = space, `\:` = `;`…).
 fn unescape_tag(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut chars = value.chars();

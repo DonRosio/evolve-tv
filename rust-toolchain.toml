@@ -1,4 +1,4 @@
-# Fige la version du compilateur : le projet compile toujours de la même façon.
+# Pins the compiler version: the project always builds the same way.
 [toolchain]
 channel = "1.99.0"
 components = ["clippy", "rustfmt"]

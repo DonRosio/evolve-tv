@@ -1,8 +1,8 @@
-//! Chargement des images (emotes, badges) : cache disque, téléchargement et décodage
-//! dans des threads de fond, puis envoi à la carte graphique sous forme de « texture ».
+//! Loading images (emotes, badges): disk cache, download and decoding
+//! in background threads, then sending to the graphics card as a "texture".
 //!
-//! Une image animée est rangée en « planche » (sprite sheet) : toutes ses frames sont
-//! disposées en grille dans une seule texture, et l'affichage choisit la bonne case.
+//! An animated image is stored as a "sheet" (sprite sheet): all its frames are
+//! laid out in a grid in a single texture, and the display picks the right cell.
 
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
@@ -23,7 +23,7 @@ use image::{AnimationDecoder, DynamicImage, ImageDecoder, ImageFormat, Limits, R
 
 use crate::{http, paths};
 
-/// Sites autorisés : on ne télécharge jamais une image ailleurs.
+/// Allowed sites: we never download an image from anywhere else.
 const ALLOWED_PREFIXES: [&str; 5] = [
     crate::emoji::TWEMOJI_BASE,
     "https://static-cdn.jtvnw.net/",
@@ -32,32 +32,32 @@ const ALLOWED_PREFIXES: [&str; 5] = [
     "https://cdn.frankerfacez.com/emote/",
 ];
 const MAX_DOWNLOAD: u64 = 2 * 1024 * 1024;
-/// Limites contre les images piégées (« bombes de décompression »).
+/// Limits against booby-trapped images ("decompression bombs").
 const MAX_SIDE: u32 = 256;
 const MAX_FRAMES: usize = 300;
 const MAX_DECODED_BYTES: usize = 32 * 1024 * 1024;
 const WORKERS: usize = 2;
-/// Une image inutilisée depuis ce délai est retirée de la mémoire.
+/// An image unused for this long is removed from memory.
 const FORGET_AFTER: Duration = Duration::from_secs(5 * 60);
 const SWEEP_EVERY: Duration = Duration::from_secs(60);
 
-/// Image prête à afficher.
+/// Image ready to display.
 pub struct Picture {
     texture: TextureHandle,
     frame_size: Vec2,
     columns: usize,
     rows: usize,
-    /// Fin de chaque frame, en secondes depuis le début de l'animation.
+    /// End of each frame, in seconds since the start of the animation.
     frame_ends: Vec<f64>,
 }
 
-/// Ce qu'il faut dessiner à un instant donné.
+/// What to draw at a given instant.
 pub struct Frame {
     pub texture: TextureId,
-    /// Partie de la texture à afficher (coordonnées de 0 à 1).
+    /// Part of the texture to display (coordinates from 0 to 1).
     pub uv: Rect,
     pub size: Vec2,
-    /// Secondes avant la frame suivante (`None` : image fixe).
+    /// Seconds before the next frame (`None`: still image).
     pub next_change: Option<f64>,
 }
 
@@ -105,7 +105,7 @@ impl ImageCache {
     pub fn new(ctx: &egui::Context) -> ImageCache {
         let (jobs, job_receiver) = mpsc::channel::<String>();
         let (result_sender, results) = mpsc::channel();
-        // Plusieurs threads se partagent la même file de travail (protégée par un verrou).
+        // Several threads share the same work queue (protected by a lock).
         let job_receiver = Arc::new(Mutex::new(job_receiver));
         let cache_dir = paths::cache_dir().map(|dir| dir.join("images"));
         for _ in 0..WORKERS {
@@ -125,7 +125,7 @@ impl ImageCache {
         }
     }
 
-    /// Récupère les images terminées et oublie celles qui ne servent plus.
+    /// Collects the finished images and forgets those that are no longer used.
     pub fn poll(&mut self) {
         while let Ok((url, picture)) = self.results.try_recv() {
             let slot = match picture {
@@ -139,17 +139,17 @@ impl ImageCache {
         }
         if self.last_sweep.elapsed() >= SWEEP_EVERY {
             self.last_sweep = Instant::now();
-            // Détruire une `TextureHandle` libère la mémoire de la carte graphique.
+            // Dropping a `TextureHandle` frees the graphics card's memory.
             self.slots.retain(|_, slot| match slot {
                 Slot::Loading => true,
                 Slot::Ready { last_used, .. } => last_used.elapsed() < FORGET_AFTER,
-                // Un échec est retenté plus tard (coupure réseau passagère…).
+                // A failure is retried later (passing network interruption…).
                 Slot::Failed(at) => at.elapsed() < FORGET_AFTER * 2,
             });
         }
     }
 
-    /// Image si elle est prête ; sinon lance son chargement et renvoie `None`.
+    /// Image if it is ready; otherwise starts loading it and returns `None`.
     pub fn get(&mut self, url: &str) -> Option<&Picture> {
         if !self.slots.contains_key(url) {
             let allowed = ALLOWED_PREFIXES.iter().any(|p| url.starts_with(p));
@@ -177,7 +177,7 @@ fn worker(
     cache_dir: Option<&Path>,
 ) {
     loop {
-        // Le verrou n'est tenu que le temps de prendre un travail.
+        // The lock is only held for the time it takes to pick up a job.
         let job = jobs.lock().ok().and_then(|receiver| receiver.recv().ok());
         let Some(url) = job else { return };
         let picture = load(&url, cache_dir)
@@ -220,8 +220,8 @@ fn load(url: &str, cache_dir: Option<&Path>) -> Result<Decoded, String> {
     decode(&bytes)
 }
 
-/// Nom de fichier dérivé de l'adresse (empreinte FNV-1a 64 bits, en hexadécimal) :
-/// aucun caractère de l'adresse ne se retrouve dans le chemin du fichier.
+/// File name derived from the address (64-bit FNV-1a hash, in hexadecimal):
+/// no character of the address ends up in the file's path.
 fn cache_name(url: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in url.bytes() {
@@ -260,7 +260,7 @@ fn check_size((width, height): (u32, u32)) -> Result<(), String> {
     Ok(())
 }
 
-/// Décode une image fixe (PNG, WebP) ou animée (GIF, WebP) en une planche de frames.
+/// Decodes a still (PNG, WebP) or animated (GIF, WebP) image into a sheet of frames.
 fn decode(bytes: &[u8]) -> Result<Decoded, String> {
     let err = |e: image::ImageError| e.to_string();
     let format = image::guess_format(bytes).map_err(err)?;
@@ -303,7 +303,7 @@ fn decode(bytes: &[u8]) -> Result<Decoded, String> {
     build_sheet(frames)
 }
 
-/// Lit les frames d'une animation avec leur durée (en secondes).
+/// Reads the frames of an animation with their duration (in seconds).
 fn collect_frames(frames: image::Frames<'_>) -> Result<Vec<(RgbaImage, f64)>, String> {
     let mut out = Vec::new();
     let mut total_bytes = 0;
@@ -311,7 +311,7 @@ fn collect_frames(frames: image::Frames<'_>) -> Result<Vec<(RgbaImage, f64)>, St
         let frame = frame.map_err(|e| e.to_string())?;
         let (numerator, denominator) = frame.delay().numer_denom_ms();
         let mut ms = f64::from(numerator) / f64::from(denominator.max(1));
-        // Convention des navigateurs : une durée quasi nulle vaut 100 ms.
+        // Browser convention: a near-zero duration counts as 100 ms.
         if ms < 20.0 {
             ms = 100.0;
         }
@@ -328,7 +328,7 @@ fn collect_frames(frames: image::Frames<'_>) -> Result<Vec<(RgbaImage, f64)>, St
     Ok(out)
 }
 
-/// Range les frames en grille dans une seule image.
+/// Lays the frames out in a grid in a single image.
 fn build_sheet(frames: Vec<(RgbaImage, f64)>) -> Result<Decoded, String> {
     let (width, height) = frames[0].0.dimensions();
     if frames
@@ -390,7 +390,7 @@ mod tests {
         // 3 frames → grille de 2 colonnes × 2 lignes.
         assert_eq!((decoded.columns, decoded.rows), (2, 2));
         assert_eq!(decoded.sheet.size, [4, 4]);
-        // Pixel en haut à gauche de la 2e frame (colonne 1, ligne 0).
+        // Top-left pixel of the 2nd frame (column 1, row 0).
         assert_eq!(decoded.sheet.pixels[2].r(), 2);
         assert_eq!(decoded.frame_ends.len(), 3);
         assert!((decoded.frame_ends[2] - 0.3).abs() < 1e-9);

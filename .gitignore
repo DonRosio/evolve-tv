@@ -1,7 +1,7 @@
 # Build Rust
 /target
 
-# Secrets : ne JAMAIS committer de jeton ni de clé
+# Secrets: NEVER commit a token or a key
 .env
 .env.*
 *.token
@@ -12,13 +12,13 @@ secrets/
 token*
 credentials*
 
-# Configuration locale (la config réelle vit dans ~/.config, pas dans le dépôt)
+# Local configuration (the real config lives in ~/.config, not in the repository)
 config.local.*
 
-# Icône : photo de profil d'un streamer, usage personnel uniquement (droits de l'auteur)
+# Icon: a streamer's profile picture, personal use only (the author's rights)
 assets/icon.png
 
-# Éditeurs / système
+# Editors / system
 .vscode/
 .idea/
 *.swp

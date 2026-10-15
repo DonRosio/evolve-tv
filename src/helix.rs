@@ -1,4 +1,4 @@
-//! Appels à l'API « Helix » de Twitch : badges du chat et emotes de l'utilisateur.
+//! Calls to Twitch's "Helix" API: chat badges and the user's emotes.
 
 use std::collections::HashMap;
 
@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use crate::chat::Badge;
 use crate::http;
 
-/// Image et nom d'un badge (« Abonné depuis 1 an »…).
+/// Image and name of a badge ("Subscriber for 1 year"…).
 #[derive(Clone)]
 pub struct BadgeImage {
     pub url: String,
@@ -70,7 +70,7 @@ fn is_numeric_id(id: &str) -> bool {
     !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit())
 }
 
-/// Badges globaux puis ceux de la chaîne (qui remplacent les globaux, ex. badges d'abonné).
+/// Global badges then the channel's (which replace the global ones, e.g. subscriber badges).
 pub fn badges(
     client_id: &str,
     token: &str,
@@ -108,9 +108,9 @@ pub fn badges(
     Ok(badges)
 }
 
-/// Emotes Twitch utilisables par l'utilisateur (globales, abonnements…) : nom → identifiant.
-/// Sert à afficher nos propres messages (Twitch ne nous les renvoie pas) et, plus tard,
-/// à l'autocomplétion.
+/// Twitch emotes the user can use (global, subscriptions…): name → identifier.
+/// Used to show our own messages (Twitch does not send them back to us) and, later,
+/// for autocompletion.
 pub fn user_emotes(
     client_id: &str,
     token: &str,
@@ -121,7 +121,7 @@ pub fn user_emotes(
     }
     let mut emotes = HashMap::new();
     let mut cursor: Option<String> = None;
-    // Plafond de pages : protège d'une boucle infinie si l'API répondait mal.
+    // Page cap: protects against an infinite loop if the API answered badly.
     for _ in 0..50 {
         let mut query = vec![("user_id", user_id)];
         if let Some(after) = &cursor {

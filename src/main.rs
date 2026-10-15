@@ -1,5 +1,5 @@
-// Interdit tout code `unsafe` dans notre crate : le compilateur refusera de compiler
-// s'il en trouve. Les garanties mémoire de Rust s'appliquent donc à tout notre code.
+// Forbids any `unsafe` code in our crate: the compiler will refuse to compile
+// if it finds some. Rust's memory guarantees therefore apply to all our code.
 #![forbid(unsafe_code)]
 
 mod app;

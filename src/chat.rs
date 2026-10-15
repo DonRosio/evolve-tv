@@ -1,5 +1,5 @@
-//! Connexion au chat Twitch (IRC chiffré par TLS) dans un thread dédié,
-//! avec reconnexion automatique et respect des limites d'envoi.
+//! Connection to the Twitch chat (IRC encrypted with TLS) in a dedicated thread,
+//! with automatic reconnection and respect for the sending limits.
 
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
@@ -17,16 +17,16 @@ use crate::irc::{self, IrcMessage};
 
 const HOST: &str = "irc.chat.twitch.tv";
 const PORT: u16 = 6697;
-/// Twitch refuse les messages de plus de 500 caractères.
+/// Twitch refuses messages of more than 500 characters.
 const MAX_MESSAGE_CHARS: usize = 500;
 const MAX_LINE: usize = 64 * 1024;
-/// Ajouté une fois sur deux à un message identique au précédent (moins de 30 s),
-/// que Twitch refuserait sinon. Même astuce que Chatterino : espace + U+E0000,
-/// un caractère invisible.
+/// Added every other time to a message identical to the previous one (less than 30 s),
+/// which Twitch would refuse otherwise. Same trick as Chatterino: space + U+E0000,
+/// an invisible character.
 const INVISIBLE_SUFFIX: &str = " \u{E0000}";
 
-/// Identifiants utilisés à chaque (re)connexion. Partagés avec l'application,
-/// qui les met à jour quand le jeton est renouvelé. Volontairement sans `Debug`.
+/// Credentials used at every (re)connection. Shared with the application,
+/// which updates them when the token is renewed. Deliberately without `Debug`.
 pub struct ChatLogin {
     pub login: String,
     pub access_token: String,
@@ -48,15 +48,15 @@ pub struct ChatMessage {
     pub color: Option<[u8; 3]>,
     pub badges: Vec<Badge>,
     pub text: String,
-    /// Emotes Twitch : (identifiant, premier caractère, dernier caractère).
+    /// Twitch emotes: (identifier, first character, last character).
     pub emotes: Vec<(String, usize, usize)>,
-    /// Message `/me` (affiché en couleur).
+    /// `/me` message (shown in colour).
     pub action: bool,
-    /// Envoyé par moi (Twitch ne renvoie pas nos propres messages).
+    /// Sent by me (Twitch does not send our own messages back).
     pub own: bool,
-    /// Premier message de cette personne dans la chaîne.
+    /// This person's first message in the channel.
     pub first: bool,
-    /// Réponse à un autre message.
+    /// Reply to another message.
     pub reply: Option<ReplyInfo>,
 }
 
@@ -66,7 +66,7 @@ pub struct ReplyInfo {
     pub parent_body: String,
 }
 
-/// Message auquel on répond.
+/// Message being replied to.
 #[derive(Clone, Debug)]
 pub struct ReplyTarget {
     pub id: String,
@@ -86,14 +86,14 @@ pub enum ChatEvent {
     },
     Disconnected(String),
     Message(ChatMessage),
-    /// Message système (abonnement, raid, annonce…).
+    /// System message (subscription, raid, announcement…).
     Notice(String),
     Clear(ClearTarget),
-    /// Identifiant numérique de la chaîne (sert à récupérer ses badges).
+    /// Numeric identifier of the channel (used to fetch its badges).
     RoomId(String),
-    /// Twitch refuse le jeton : l'application doit le renouveler.
+    /// Twitch refuses the token: the application must renew it.
     AuthFailed,
-    /// Message non envoyé (limite, mode lent, chat déconnecté…).
+    /// Message not sent (limit, slow mode, chat disconnected…).
     SendRejected(String),
 }
 
@@ -104,7 +104,7 @@ enum Command {
     },
 }
 
-/// Poignée sur le thread du chat. Le détruire arrête la connexion.
+/// Handle on the chat thread. Dropping it stops the connection.
 pub struct Chat {
     commands: Sender<Command>,
     stop: Arc<AtomicBool>,
@@ -133,7 +133,7 @@ impl Chat {
 
 impl Drop for Chat {
     fn drop(&mut self) {
-        // Le thread vérifie ce drapeau 10 fois par seconde et se termine.
+        // The thread checks this flag 10 times a second and ends.
         self.stop.store(true, Ordering::Relaxed);
     }
 }
@@ -150,7 +150,7 @@ fn run(
     while !stop.load(Ordering::Relaxed) {
         let started = Instant::now();
         let Err(reason) = session(channel, login, commands, stop, on_event) else {
-            return; // arrêt demandé
+            return; // stop requested
         };
         if stop.load(Ordering::Relaxed) {
             return;
@@ -161,8 +161,8 @@ fn run(
         }
         let deadline = Instant::now() + delay;
         while Instant::now() < deadline && !stop.load(Ordering::Relaxed) {
-            // Pendant la coupure, les messages à envoyer sont refusés plutôt que
-            // d'être envoyés en retard.
+            // During the interruption, messages to send are refused rather than
+            // being sent late.
             while let Ok(Command::Send { .. }) = commands.try_recv() {
                 on_event(ChatEvent::SendRejected(
                     "chat déconnecté, message non envoyé".into(),
@@ -206,8 +206,8 @@ fn connect() -> Result<Stream, String> {
                         .and_then(|()| tcp.set_write_timeout(Some(Duration::from_secs(10))))
                         .map_err(|e| e.to_string())
                 };
-                // La « poignée de main » TLS (échange de clés avec le serveur) se fait
-                // d'abord, avec un délai généreux…
+                // The TLS "handshake" (key exchange with the server) is done
+                // first, with a generous timeout…
                 timeout(&tcp, Duration::from_secs(10))?;
                 let name = ServerName::try_from(HOST).map_err(|e| e.to_string())?;
                 let mut tls =
@@ -216,8 +216,8 @@ fn connect() -> Result<Stream, String> {
                     tls.complete_io(&mut tcp)
                         .map_err(|e| format!("échec de la connexion chiffrée : {e}"))?;
                 }
-                // … puis lecture avec délai court : le thread peut ainsi aussi envoyer
-                // des messages et vérifier s'il doit s'arrêter.
+                // … then reading with a short timeout: the thread can thus also send
+                // messages and check whether it must stop.
                 timeout(&tcp, Duration::from_millis(100))?;
                 return Ok(StreamOwned::new(tls, tcp));
             }
@@ -234,7 +234,7 @@ fn send_line(stream: &mut Stream, line: &str) -> Result<(), String> {
         .map_err(|e| format!("envoi impossible : {e}"))
 }
 
-/// Ce que Twitch nous dit de nous-mêmes (USERSTATE) : sert à afficher nos messages.
+/// What Twitch tells us about ourselves (USERSTATE): used to show our messages.
 #[derive(Default)]
 struct Me {
     login: Option<String>,
@@ -244,7 +244,7 @@ struct Me {
 }
 
 impl Me {
-    /// Modérateur, VIP ou propriétaire de la chaîne : limites d'envoi plus larges.
+    /// Moderator, VIP or channel owner: wider sending limits.
     fn privileged(&self) -> bool {
         self.badges
             .iter()
@@ -252,14 +252,14 @@ impl Me {
     }
 }
 
-/// Limites d'envoi de Twitch, vérifiées avant chaque message pour éviter
-/// d'être bloqué temporairement.
+/// Twitch's sending limits, checked before every message to avoid
+/// being blocked temporarily.
 #[derive(Default)]
 struct SendRules {
     recent: VecDeque<Instant>,
     slow_mode_secs: u64,
     last_sent: Option<Instant>,
-    /// Dernier texte envoyé et ajout (ou non) du suffixe invisible.
+    /// Last text sent and whether the invisible suffix was added.
     last_text: Option<String>,
     suffix_used: bool,
 }
@@ -291,9 +291,9 @@ impl SendRules {
         Ok(())
     }
 
-    /// Faut-il ajouter le suffixe invisible ? Oui si ce texte est identique au
-    /// précédent, envoyé il y a moins de 30 s… et en alternance : le suivant
-    /// identique repartira sans suffixe (il diffère alors du message d'avant).
+    /// Should the invisible suffix be added? Yes if this text is identical to the
+    /// previous one, sent less than 30 s ago… and in alternation: the next
+    /// identical one will go out without a suffix (it then differs from the previous message).
     fn needs_suffix(&self, text: &str) -> bool {
         self.last_text.as_deref() == Some(text)
             && self
@@ -311,7 +311,7 @@ impl SendRules {
     }
 }
 
-/// Une connexion complète. `Ok(())` : arrêt demandé ; `Err` : connexion perdue.
+/// A complete connection. `Ok(())`: stop requested; `Err`: connection lost.
 fn session(
     channel: &str,
     login: &SharedLogin,
@@ -337,7 +337,7 @@ fn session(
             me.display_name = login.clone();
         }
         None => {
-            // Connexion anonyme en lecture seule, autorisée par Twitch.
+            // Anonymous read-only connection, allowed by Twitch.
             let n = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| d.subsec_nanos() % 90_000 + 10_000);
@@ -396,7 +396,7 @@ fn session(
             Err(e) => return Err(format!("connexion perdue : {e}")),
         }
 
-        // Twitch envoie un PING toutes les ~5 min. Sans nouvelles, on vérifie nous-mêmes.
+        // Twitch sends a PING every ~5 min. Without news, we check by ourselves.
         let silence = last_received.elapsed();
         if silence > Duration::from_secs(6 * 60) && !ping_sent {
             send_line(&mut stream, "PING :evolve-tv")?;
@@ -436,11 +436,11 @@ fn send_message(
         content.push_str(INVISIBLE_SUFFIX);
     }
     let (body, action) = match content.strip_prefix("/me ") {
-        // Format standard des actions IRC (CTCP ACTION).
+        // Standard format of IRC actions (CTCP ACTION).
         Some(action) => (format!("\u{1}ACTION {action}\u{1}"), true),
         None => (content.clone(), false),
     };
-    // Réponse : le tag « reply-parent-msg-id » relie le message à celui d'origine.
+    // Reply: the "reply-parent-msg-id" tag links the message to the original one.
     let reply_tag = match reply_to {
         Some(target) if is_valid_message_id(&target.id) => {
             format!("@reply-parent-msg-id={} ", target.id)
@@ -473,8 +473,8 @@ fn send_message(
     Ok(())
 }
 
-/// Retire les caractères de contrôle (dont les retours à la ligne, qui permettraient
-/// d'injecter une seconde commande IRC) et limite la longueur.
+/// Removes control characters (including line breaks, which would allow
+/// injecting a second IRC command) and limits the length.
 fn sanitize(text: &str) -> Option<String> {
     let clean: String = text
         .chars()
@@ -551,7 +551,7 @@ fn handle(
             }
         }
         "ROOMSTATE" => {
-            // ROOMSTATE peut ne contenir que les réglages qui ont changé.
+            // ROOMSTATE may only contain the settings that changed.
             if let Some(slow) = message.tags.get("slow") {
                 rules.slow_mode_secs = slow.parse().unwrap_or(0);
             }
@@ -618,7 +618,7 @@ fn parse_privmsg(message: &IrcMessage) -> Option<ChatMessage> {
     })
 }
 
-/// Identifiant de message Twitch (UUID) : chiffres hexadécimaux et tirets.
+/// Twitch message identifier (UUID): hexadecimal digits and dashes.
 pub fn is_valid_message_id(id: &str) -> bool {
     (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
 }
@@ -711,7 +711,7 @@ mod tests {
         assert!(rules.check(false).is_ok());
         rules.record("a", false);
         assert!(rules.check(false).is_err());
-        assert!(rules.check(true).is_ok()); // les modérateurs ne sont pas concernés
+        assert!(rules.check(true).is_ok()); // moderators are not concerned
     }
 
     #[test]
@@ -721,7 +721,7 @@ mod tests {
         rules.record("!join", false);
         assert!(rules.needs_suffix("!join")); // doublon : suffixe invisible
         rules.record("!join", true);
-        assert!(!rules.needs_suffix("!join")); // en alternance : sans suffixe
+        assert!(!rules.needs_suffix("!join")); // in alternation: without a suffix
         rules.record("!join", false);
         assert!(!rules.needs_suffix("autre chose"));
     }

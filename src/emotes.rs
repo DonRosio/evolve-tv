@@ -1,8 +1,8 @@
-//! Emotes 7TV, BTTV et FFZ : globales et propres à la chaîne.
+//! 7TV, BTTV and FFZ emotes: global and channel-specific.
 //!
-//! Ces trois services exposent des API publiques (sans compte). Les adresses des
-//! images sont reconstruites ici à partir des identifiants, jamais reprises telles
-//! quelles des réponses : impossible de nous faire télécharger une image ailleurs.
+//! These three services expose public APIs (no account). The addresses of the
+//! images are rebuilt here from the identifiers, never taken as is
+//! from the responses: we cannot be made to download an image from elsewhere.
 
 use std::collections::HashMap;
 
@@ -34,7 +34,7 @@ impl Provider {
 pub struct Emote {
     pub name: String,
     pub url: String,
-    /// Emote « zero-width » : dessinée par-dessus l'emote précédente.
+    /// "Zero-width" emote: drawn on top of the previous emote.
     pub zero_width: bool,
     pub provider: Provider,
 }
@@ -43,12 +43,12 @@ pub type EmoteMap = HashMap<String, Emote>;
 
 pub struct Loaded {
     pub emotes: EmoteMap,
-    /// Nombre d'emotes par service (pour le message de confirmation).
+    /// Number of emotes per service (for the confirmation message).
     pub counts: Vec<(Provider, usize)>,
     pub errors: Vec<String>,
 }
 
-/// Emotes zero-width historiques de BTTV (BTTV ne les signale pas dans son API).
+/// BTTV's historical zero-width emotes (BTTV does not flag them in its API).
 const BTTV_ZERO_WIDTH: [&str; 8] = [
     "IceCold",
     "SoSnowy",
@@ -60,11 +60,11 @@ const BTTV_ZERO_WIDTH: [&str; 8] = [
     "cvHazmat",
 ];
 
-/// Charge toutes les emotes (appel bloquant : quelques requêtes HTTP).
+/// Loads all the emotes (blocking call: a few HTTP requests).
 pub fn load(room_id: &str) -> Loaded {
     type Source = fn(&str) -> Result<Vec<Emote>, String>;
-    // Ordre de priorité : en cas de nom identique, la dernière source gagne
-    // (les emotes de la chaîne passent devant les globales, 7TV devant BTTV et FFZ).
+    // Order of priority: when a name is identical, the last source wins
+    // (the channel's emotes come before the global ones, 7TV before BTTV and FFZ).
     let sources: [(Provider, &str, Source); 6] = [
         (Provider::Ffz, "globales", ffz_global),
         (Provider::Bttv, "globales", bttv_global),
@@ -95,7 +95,7 @@ pub fn load(room_id: &str) -> Loaded {
     }
 }
 
-/// GET JSON ; `Ok(None)` si la ressource n'existe pas (chaîne sans compte 7TV…).
+/// GET JSON; `Ok(None)` if the resource does not exist (a channel without a 7TV account…).
 fn get_json<T: DeserializeOwned>(url: &str) -> Result<Option<T>, String> {
     let mut response = http::agent().get(url).call().map_err(|e| e.to_string())?;
     match response.status().as_u16() {
@@ -109,7 +109,7 @@ fn is_valid_id(id: &str) -> bool {
     (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
-/// Un nom d'emote est un « mot » : ni vide, ni espace, longueur raisonnable.
+/// An emote name is a "word": not empty, no space, reasonable length.
 fn is_valid_name(name: &str) -> bool {
     (1..=100).contains(&name.chars().count()) && !name.chars().any(char::is_whitespace)
 }
@@ -134,7 +134,7 @@ struct SevenTvSet {
 #[derive(Deserialize)]
 struct SevenTvEmote {
     id: String,
-    /// Nom dans ce set (la chaîne peut renommer une emote).
+    /// Name in this set (the channel can rename an emote).
     name: String,
     #[serde(default)]
     flags: u32,
@@ -157,7 +157,7 @@ fn seventv_emotes(set: SevenTvSet) -> Vec<Emote> {
         .into_iter()
         .filter(|e| is_valid_id(&e.id))
         .filter_map(|e| {
-            // Zero-width : drapeau du set (bit 0) ou de l'emote elle-même (bit 8).
+            // Zero-width: flag of the set (bit 0) or of the emote itself (bit 8).
             let zero_width =
                 e.flags & 1 != 0 || e.data.as_ref().is_some_and(|d| d.flags & 256 != 0);
             let url = format!("https://cdn.7tv.app/emote/{}/1x.webp", e.id);
@@ -234,10 +234,10 @@ struct FfzSet {
 struct FfzEmote {
     id: u64,
     name: String,
-    /// Les « modificateurs » FFZ transforment l'emote précédente : non gérés, ignorés.
+    /// FFZ "modifiers" transform the previous emote: not handled, ignored.
     #[serde(default)]
     modifier: bool,
-    /// Présent seulement pour les emotes animées.
+    /// Present only for animated emotes.
     animated: Option<serde_json::Value>,
 }
 

@@ -1,4 +1,4 @@
-//! Sélecteur d'emotes : parcourir toutes les emotes disponibles et choisir ses favorites.
+//! Emote picker: browse all the available emotes and choose one's favourites.
 
 use std::collections::HashSet;
 
@@ -7,12 +7,12 @@ use eframe::egui::{self, Color32, RichText, Sense, Stroke, Vec2};
 use crate::emotes::{Emote, Provider};
 use crate::images::ImageCache;
 
-/// Taille d'une case de la grille, et hauteur de l'image dedans.
+/// Size of a cell of the grid, and height of the image inside it.
 const CELL: f32 = 36.0;
 const ICON: f32 = 28.0;
 const FAVORITE_BORDER: Color32 = Color32::from_rgb(240, 190, 60);
 
-/// Emotes classées par service puis par nom (reconstruit quand les emotes changent).
+/// Emotes sorted by service then by name (rebuilt when the emotes change).
 #[derive(Default)]
 pub struct Catalog {
     sections: Vec<(Provider, Vec<Emote>)>,
@@ -49,7 +49,7 @@ pub enum Action {
     Insert(String),
 }
 
-/// Une rangée de la grille : un titre de section ou une rangée d'emotes.
+/// A row of the grid: a section title or a row of emotes.
 enum Row<'a> {
     Header(Provider, usize),
     Cells(Vec<&'a Emote>),
@@ -119,8 +119,8 @@ impl Picker {
             return None;
         }
 
-        // Toutes les rangées ont la même hauteur : seules les rangées visibles sont
-        // dessinées, et seules leurs images sont téléchargées.
+        // All rows have the same height: only the visible rows are
+        // drawn, and only their images are downloaded.
         ui.spacing_mut().item_spacing.y = 0.0;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])

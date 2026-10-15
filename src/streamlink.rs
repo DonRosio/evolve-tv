@@ -1,5 +1,5 @@
-//! Pilotage de streamlink : il se connecte à Twitch et sert le flux vidéo
-//! sur `127.0.0.1` (accessible uniquement depuis ce PC), où mpv vient le lire.
+//! Driving streamlink: it connects to Twitch and serves the video stream
+//! on `127.0.0.1` (reachable only from this PC), where mpv comes to read it.
 
 use std::cmp::Reverse;
 use std::io::{BufRead, BufReader, Read};
@@ -9,22 +9,22 @@ use std::thread;
 
 use crate::config;
 
-/// Messages remontés par streamlink pendant qu'il tourne.
+/// Messages reported by streamlink while it runs.
 #[derive(Debug)]
 pub enum ServerEvent {
-    /// La chaîne est hors ligne : streamlink réessaie toutes les 30 s.
+    /// The channel is offline: streamlink retries every 30 s.
     WaitingForLive,
-    /// Qualités proposées par Twitch, de la meilleure à la moins bonne.
+    /// Qualities offered by Twitch, from best to worst.
     Qualities(Vec<String>),
-    /// Le serveur local est prêt : mpv peut lire cette adresse.
+    /// The local server is ready: mpv can read this address.
     Ready(String),
-    /// Un lecteur s'est connecté et streamlink lui envoie cette qualité.
+    /// A player connected and streamlink sends it this quality.
     Opened(String),
     /// Message d'erreur de streamlink.
     Error(String),
 }
 
-/// Hauteurs d'image utilisées par Twitch, de la plus grande à la plus petite.
+/// Image heights used by Twitch, from largest to smallest.
 const HEIGHTS: [u32; 8] = [1440, 1080, 936, 900, 720, 480, 360, 160];
 
 /// `"1080p60"` → `(1080, Some(60))` ; `"480p"` → `(480, None)`.
@@ -42,10 +42,10 @@ pub fn parse_resolution(name: &str) -> Option<(u32, Option<u32>)> {
     Some((height, fps))
 }
 
-/// Liste ordonnée des noms de qualité à demander à streamlink pour obtenir
-/// « la meilleure qualité sans dépasser `max_quality` ». streamlink prend le
-/// premier nom disponible, d'où un repli automatique (480p → 360p → …).
-/// Les variantes `_portrait` (téléphones) ne sont jamais demandées.
+/// Ordered list of quality names to ask streamlink for, to get
+/// "the best quality without exceeding `max_quality`". streamlink takes the
+/// first available name, hence an automatic fallback (480p → 360p → …).
+/// The `_portrait` variants (phones) are never requested.
 pub fn candidates_up_to(max_quality: &str) -> Vec<String> {
     let Some((max_height, max_fps)) = parse_resolution(max_quality) else {
         return vec!["best".into()];
@@ -62,16 +62,16 @@ pub fn candidates_up_to(max_quality: &str) -> Vec<String> {
             }
             names.push(format!("{height}p{fps}"));
         }
-        // Ancien nommage Twitch, sans fréquence d'images.
+        // Old Twitch naming, without a frame rate.
         names.push(format!("{height}p"));
     }
-    // Dernier recours si aucun nom standard n'existe.
+    // Last resort if no standard name exists.
     names.push(if max_height >= 720 { "best" } else { "worst" }.into());
     names
 }
 
-/// Prévoit la qualité que streamlink choisira : le premier nom de `candidates`
-/// présent dans `available` (triée de la meilleure à la moins bonne).
+/// Predicts the quality streamlink will pick: the first name of `candidates`
+/// present in `available` (sorted from best to worst).
 pub fn expected_choice(candidates: &[String], available: &[String]) -> Option<String> {
     let video = || available.iter().filter(|q| parse_resolution(q).is_some());
     candidates
@@ -87,22 +87,22 @@ pub fn channel_url(channel: &str) -> String {
     format!("https://www.twitch.tv/{channel}")
 }
 
-/// Un processus streamlink en cours. Il est arrêté automatiquement quand cette
-/// valeur est détruite (voir `impl Drop` plus bas).
+/// A streamlink process in progress. It is stopped automatically when this
+/// value is dropped (see `impl Drop` below).
 pub struct Server {
     child: Child,
 }
 
 impl Server {
-    /// Lance streamlink. Il attend que la chaîne soit en ligne, puis ouvre le serveur local.
-    /// `on_event` est appelée depuis des threads de fond à chaque message utile.
+    /// Starts streamlink. It waits for the channel to be online, then opens the local server.
+    /// `on_event` is called from background threads at every useful message.
     pub fn start(
         program: &Path,
         channel: &str,
         qualities: &[String],
         on_event: impl Fn(ServerEvent) + Clone + Send + 'static,
     ) -> Result<Server, String> {
-        // Défense en profondeur : ces valeurs deviennent des arguments de commande.
+        // Defence in depth: these values become command arguments.
         if !config::is_valid_channel(channel) {
             return Err(format!("nom de chaîne invalide : {channel}"));
         }
@@ -110,10 +110,10 @@ impl Server {
             return Err("liste de qualités invalide".into());
         }
 
-        // Pas de shell (`sh -c`) : chaque argument est transmis tel quel, rien ne peut
-        // être interprété comme une commande.
+        // No shell (`sh -c`): each argument is passed as is, nothing can
+        // be interpreted as a command.
         let mut child = Command::new(program)
-            // Ignore ~/.config/streamlink/config : seul notre code décide du comportement.
+            // Ignores ~/.config/streamlink/config: only our code decides the behaviour.
             .arg("--no-config")
             .args(["--loglevel", "info"])
             .arg("--twitch-low-latency")
@@ -123,9 +123,9 @@ impl Server {
                 "yes",
             ])
             .args(["--player-external-http-interface", "127.0.0.1"])
-            // Hors ligne : réessayer toutes les 30 s, indéfiniment.
+            // Offline: retry every 30 s, indefinitely.
             .args(["--retry-streams", "30", "--retry-max", "0"])
-            // `--` : tout ce qui suit est une valeur, jamais une option.
+            // `--`: everything that follows is a value, never an option.
             .arg("--")
             .arg(channel_url(channel))
             .arg(qualities.join(","))
@@ -144,7 +144,7 @@ impl Server {
         Ok(Server { child })
     }
 
-    /// `Some(statut)` si streamlink s'est arrêté.
+    /// `Some(status)` if streamlink stopped.
     pub fn exited(&mut self) -> Option<ExitStatus> {
         self.child.try_wait().ok().flatten()
     }
@@ -153,12 +153,12 @@ impl Server {
 impl Drop for Server {
     fn drop(&mut self) {
         let _ = self.child.kill();
-        // `wait` récupère le statut de fin : sans ça, un processus « zombie » resterait.
+        // `wait` collects the exit status: without it, a "zombie" process would remain.
         let _ = self.child.wait();
     }
 }
 
-/// Lit la sortie de streamlink ligne par ligne dans un thread dédié.
+/// Reads streamlink's output line by line in a dedicated thread.
 fn read_lines(pipe: impl Read + Send + 'static, on_event: impl Fn(ServerEvent) + Send + 'static) {
     thread::spawn(move || {
         for line in BufReader::new(pipe).lines() {
@@ -194,12 +194,12 @@ fn parse_line(line: &str) -> Option<ServerEvent> {
     error.map(|msg| ServerEvent::Error(msg.chars().take(300).collect()))
 }
 
-/// Texte situé après `marker` dans `line`.
+/// Text located after `marker` in `line`.
 fn after<'a>(line: &'a str, marker: &str) -> Option<&'a str> {
     line.find(marker).map(|i| &line[i + marker.len()..])
 }
 
-/// N'accepte que `http://127.0.0.1:<port>/` : mpv ne lira jamais une autre adresse.
+/// Only accepts `http://127.0.0.1:<port>/`: mpv will never read another address.
 fn is_local_url(url: &str) -> bool {
     url.strip_prefix("http://127.0.0.1:")
         .and_then(|rest| rest.strip_suffix('/'))

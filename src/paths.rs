@@ -1,4 +1,4 @@
-//! Emplacements des fichiers de l'application (norme XDG de Linux) et recherche des programmes.
+//! Locations of the application's files (Linux XDG standard) and lookup of programs.
 
 use std::env;
 use std::fs::{self, DirBuilder, Permissions};
@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 const APP_DIR: &str = "evolve-tv";
 
-/// Renvoie `$VAR/evolve-tv`, ou `$HOME/<repli>/evolve-tv` si la variable est absente.
-/// Les chemins relatifs sont ignorés : ils dépendraient du dossier courant.
+/// Returns `$VAR/evolve-tv`, or `$HOME/<fallback>/evolve-tv` if the variable is absent.
+/// Relative paths are ignored: they would depend on the current folder.
 fn xdg_dir(var: &str, fallback: &str) -> Option<PathBuf> {
     if let Some(dir) = env::var_os(var)
         .map(PathBuf::from)
@@ -27,18 +27,18 @@ pub fn config_dir() -> Option<PathBuf> {
     xdg_dir("XDG_CONFIG_HOME", ".config")
 }
 
-/// `~/.local/share/evolve-tv` : données installées (icône…).
+/// `~/.local/share/evolve-tv`: installed data (icon…).
 pub fn data_dir() -> Option<PathBuf> {
     xdg_dir("XDG_DATA_HOME", ".local/share")
 }
 
-/// `~/.cache/evolve-tv` : fichiers re-téléchargeables (images des emotes et badges).
+/// `~/.cache/evolve-tv`: re-downloadable files (images of emotes and badges).
 pub fn cache_dir() -> Option<PathBuf> {
     xdg_dir("XDG_CACHE_HOME", ".cache")
 }
 
 /// `/run/user/<uid>/evolve-tv` : fichiers temporaires (socket de mpv).
-/// Ce dossier système est privé à l'utilisateur et vidé à la déconnexion.
+/// This system folder is private to the user and emptied at logout.
 pub fn runtime_dir() -> Option<PathBuf> {
     env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -46,16 +46,16 @@ pub fn runtime_dir() -> Option<PathBuf> {
         .map(|p| p.join(APP_DIR))
 }
 
-/// Crée un dossier accessible uniquement par l'utilisateur (droits 0700).
+/// Creates a folder reachable only by the user (0700 permissions).
 pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
-    // Si le dossier existait déjà avec des droits plus larges, on les resserre.
+    // If the folder already existed with wider permissions, they are tightened.
     fs::set_permissions(dir, Permissions::from_mode(0o700))
 }
 
-/// Cherche un exécutable : chemin imposé par la config, sinon le PATH, sinon `~/.local/bin`.
-/// Les entrées relatives du PATH (comme `.`) sont ignorées : un fichier piégé dans le
-/// dossier courant ne pourrait pas se faire passer pour streamlink ou mpv.
+/// Looks for an executable: path imposed by the config, otherwise the PATH, otherwise `~/.local/bin`.
+/// Relative PATH entries (like `.`) are ignored: a booby-trapped file in the
+/// current folder could not pass itself off as streamlink or mpv.
 pub fn find_program(name: &str, configured: Option<&Path>) -> Option<PathBuf> {
     if let Some(path) = configured {
         return is_executable(path).then(|| path.to_path_buf());

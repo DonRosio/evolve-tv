@@ -1,10 +1,10 @@
-//! Détection des emojis dans le texte, pour les afficher en couleur (images Twemoji).
+//! Detecting emojis in the text, to show them in colour (Twemoji images).
 //!
-//! Un « emoji » peut être une suite de plusieurs caractères Unicode : 👍🏻 (pouce +
-//! couleur de peau), 👨‍👩‍👧 (trois personnes liées par des « jointures » U+200D),
-//! 🇫🇷 (deux lettres régionales), 1️⃣ (chiffre + U+FE0F + U+20E3)…
+//! An "emoji" can be a sequence of several Unicode characters: 👍🏻 (thumb +
+//! skin colour), 👨‍👩‍👧 (three people linked by U+200D "joiners"),
+//! 🇫🇷 (two regional letters), 1️⃣ (digit + U+FE0F + U+20E3)…
 
-/// Images Twemoji (version figée) servies par le CDN jsDelivr.
+/// Twemoji images (pinned version) served by the jsDelivr CDN.
 pub const TWEMOJI_BASE: &str = "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/";
 
 const ZWJ: char = '\u{200D}';
@@ -18,7 +18,7 @@ pub enum Piece<'a> {
     Emoji(&'a str),
 }
 
-/// Caractère pouvant commencer un emoji (plages Unicode des pictogrammes).
+/// Character that can start an emoji (Unicode ranges of pictograms).
 fn is_pictographic(c: char) -> bool {
     matches!(c as u32,
         0x1F000..=0x1FAFF
@@ -35,16 +35,16 @@ fn is_regional_indicator(c: char) -> bool {
     matches!(c as u32, 0x1F1E6..=0x1F1FF)
 }
 
-/// Caractères qui modifient l'emoji précédent sans en commencer un nouveau.
+/// Characters that modify the previous emoji without starting a new one.
 fn is_modifier(c: char) -> bool {
     matches!(c as u32,
         0xFE0E | 0xFE0F         // variantes texte / emoji
         | 0x1F3FB..=0x1F3FF    // couleurs de peau
         | 0x20E3               // touche de clavier
-        | 0xE0020..=0xE007F) // étiquettes (drapeaux régionaux : Écosse…)
+        | 0xE0020..=0xE007F) // tags (regional flags: Scotland…)
 }
 
-/// Découpe `text` en morceaux de texte et d'emojis.
+/// Splits `text` into pieces of text and emojis.
 pub fn split(text: &str) -> Vec<Piece<'_>> {
     let mut pieces = Vec::new();
     let mut text_start = 0;
@@ -60,7 +60,7 @@ pub fn split(text: &str) -> Vec<Piece<'_>> {
         }
         let mut end = start + c.len_utf8();
         if is_regional_indicator(c) {
-            // Un drapeau = deux lettres régionales.
+            // A flag = two regional letters.
             if let Some(&(i, n)) = chars.peek()
                 && is_regional_indicator(n)
             {
@@ -68,7 +68,7 @@ pub fn split(text: &str) -> Vec<Piece<'_>> {
                 chars.next();
             }
         }
-        // Modificateurs et suites reliées par des jointures (U+200D).
+        // Modifiers and sequences linked by joiners (U+200D).
         while let Some(&(i, n)) = chars.peek() {
             if is_modifier(n) {
                 end = i + n.len_utf8();
@@ -105,16 +105,16 @@ pub fn split(text: &str) -> Vec<Piece<'_>> {
     pieces
 }
 
-/// Un pictogramme seul (sans U+FE0F) est-il affiché en emoji par défaut ?
-/// Les flèches et formes géométriques (→, ■…) restent du texte ; les vrais
-/// emojis (🤡, ⭐, ♀…) sont convertis.
+/// Is a lone pictogram (without U+FE0F) shown as an emoji by default?
+/// Arrows and geometric shapes (→, ■…) stay text; the real
+/// emojis (🤡, ⭐, ♀…) are converted.
 fn is_emoji_alone(c: char) -> bool {
     !matches!(c as u32, 0x2190..=0x21FF | 0x25A0..=0x25FF | 0x2300..=0x23FF)
         || matches!(c as u32, 0x231A | 0x231B | 0x23E9..=0x23F3 | 0x23F8..=0x23FA | 0x25FD | 0x25FE)
 }
 
-/// Adresse de l'image Twemoji : codes hexadécimaux joints par `-`. Convention de
-/// Twemoji : U+FE0F est retiré, sauf dans les suites reliées par U+200D.
+/// Address of the Twemoji image: hexadecimal codes joined by `-`. Twemoji
+/// convention: U+FE0F is removed, except in sequences linked by U+200D.
 pub fn twemoji_url(cluster: &str) -> String {
     let keep_vs16 = cluster.contains(ZWJ);
     let code: Vec<String> = cluster
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn texte_conserve() {
-        // Flèche simple et demande explicite d'affichage texte : pas d'image.
+        // Simple arrow and explicit request for text display: no image.
         assert!(emojis("a → b").is_empty());
         assert!(emojis("♀\u{FE0E}").is_empty());
     }

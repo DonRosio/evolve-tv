@@ -1,15 +1,15 @@
-//! Détection du réseau Wi-Fi actuel via `nmcli`, l'outil en ligne de commande de NetworkManager.
+//! Detecting the current Wi-Fi network through `nmcli`, NetworkManager's command-line tool.
 
 use std::process::{Command, Stdio};
 
 use crate::paths;
 
-/// Nom (SSID) du réseau Wi-Fi actif, ou `None` (pas de Wi-Fi, câble, nmcli absent…).
-/// Appel bloquant (quelques dizaines de ms) : à faire hors du thread de l'interface.
+/// Name (SSID) of the active Wi-Fi network, or `None` (no Wi-Fi, cable, nmcli missing…).
+/// Blocking call (a few tens of ms): to be done outside the interface thread.
 pub fn current_wifi() -> Option<String> {
     let nmcli = paths::find_program("nmcli", None)?;
     let output = Command::new(nmcli)
-        // -t : sortie « terse », facile à analyser ; --rescan no : pas de nouveau scan (rapide).
+        // -t: "terse" output, easy to parse; --rescan no: no new scan (fast).
         .args([
             "-t",
             "-f",
@@ -20,7 +20,7 @@ pub fn current_wifi() -> Option<String> {
             "--rescan",
             "no",
         ])
-        // Force l'anglais : sinon la colonne ACTIVE vaut « oui » au lieu de « yes ».
+        // Forces English: otherwise the ACTIVE column is "oui" instead of "yes".
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -36,7 +36,7 @@ pub fn current_wifi() -> Option<String> {
         .filter(|ssid| !ssid.is_empty())
 }
 
-/// En mode `-t`, nmcli échappe `:` et `\` avec un antislash : on retire ces échappements.
+/// In `-t` mode, nmcli escapes `:` and `\` with a backslash: we remove those escapes.
 fn unescape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars();

@@ -1,6 +1,6 @@
-//! Panneau du chat : messages avec badges et emotes (animées, zero-width),
-//! défilement, actions au survol (copier, répondre), zone de saisie avec
-//! autocomplétion (Tab).
+//! Chat panel: messages with badges and emotes (animated, zero-width),
+//! scrolling, actions on hover (copy, reply), input area with
+//! autocompletion (Tab).
 
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
@@ -23,31 +23,31 @@ use crate::helix::BadgeImage;
 use crate::images::{ImageCache, Picture};
 use crate::style;
 
-/// Messages gardés en mémoire (les plus anciens sont oubliés).
+/// Messages kept in memory (the oldest ones are forgotten).
 const MAX_LINES: usize = 300;
 const MAX_CHATTERS: usize = 300;
 const EMOTE_HEIGHT: f32 = 28.0;
 const BADGE_SIZE: f32 = 18.0;
-/// Les emojis sont affichés à la taille du texte.
+/// Emojis are shown at the size of the text.
 const EMOJI_SIZE: f32 = 18.0;
 const SUGGESTION_HEIGHT: f32 = 20.0;
-/// Marge réservée à droite de chaque message pour les boutons Copier / Répondre.
+/// Margin reserved on the right of each message for the Copy / Reply buttons.
 const ACTIONS_WIDTH: f32 = 48.0;
-/// Texte des messages : presque blanc, bien lisible sur le fond sombre.
+/// Message text: almost white, easy to read on the dark background.
 const TEXT_COLOR: Color32 = Color32::from_gray(230);
-/// Fond d'un message survolé, et d'une emote survolée (un peu plus clair).
+/// Background of a hovered message, and of a hovered emote (a bit lighter).
 const HOVER_BG: Color32 = Color32::from_gray(45);
 const EMOTE_HOVER_BG: Color32 = Color32::from_gray(80);
-/// Couleur des liens (violet, comme sur Twitch).
+/// Colour of links (purple, as on Twitch).
 const LINK_COLOR: Color32 = Color32::from_rgb(169, 112, 255);
-/// Premier message d'une personne : rose, comme sur Twitch.
+/// A person's first message: pink, as on Twitch.
 const FIRST_COLOR: Color32 = Color32::from_rgb(255, 117, 196);
-/// Au-delà de cette longueur, un mot peut être coupé en fin de ligne.
+/// Beyond this length, a word may be cut at the end of the line.
 const LONG_WORD: usize = 30;
-/// Les animations sont redessinées au plus 30 fois par seconde.
+/// Animations are redrawn at most 30 times a second.
 const MIN_FRAME_DELAY: f64 = 1.0 / 30.0;
 
-/// Couleurs attribuées par Twitch aux comptes qui n'en ont pas choisi.
+/// Colours Twitch assigns to accounts that have not chosen one.
 const DEFAULT_COLORS: [[u8; 3]; 15] = [
     [255, 0, 0],
     [0, 0, 255],
@@ -70,7 +70,7 @@ const DEFAULT_COLORS: [[u8; 3]; 15] = [
 enum Segment {
     Text(String),
     Link(String),
-    /// Emoji affiché en couleur (image Twemoji).
+    /// Emoji shown in colour (Twemoji image).
     Emoji {
         text: String,
         url: String,
@@ -92,7 +92,7 @@ enum LineKind {
         action: bool,
         mention: bool,
         first: bool,
-        /// Art ASCII (caractères braille) : une « ligne » de dessin par rangée.
+        /// ASCII art (braille characters): one drawing "line" per row.
         art: bool,
         reply: Option<ReplyInfo>,
     },
@@ -100,33 +100,33 @@ enum LineKind {
 }
 
 struct Line {
-    /// Numéro unique de la ligne (identifiant stable pour les boutons au survol).
+    /// Unique number of the line (stable identifier for the hover buttons).
     seq: u64,
     id: String,
     login: String,
     display_name: String,
-    /// Texte brut, pour « Copier » et « Répondre ».
+    /// Plain text, for "Copy" and "Reply".
     text: String,
     kind: LineKind,
     deleted: bool,
-    /// Hauteur mesurée au dernier affichage, et largeur correspondante : permet de
-    /// ne dessiner que les lignes visibles (les autres sont remplacées par un espace vide).
-    /// `Cell` autorise la mise à jour pendant qu'on parcourt les lignes en lecture.
+    /// Height measured at the last display, and the matching width: makes it possible to
+    /// draw only the visible lines (the others are replaced by an empty space).
+    /// `Cell` allows updating it while the lines are being walked through read-only.
     height: Cell<f32>,
     width: Cell<f32>,
 }
 
-/// Autocomplétion en cours (Tab / Shift+Tab font défiler les propositions).
+/// Autocompletion in progress (Tab / Shift+Tab cycle through the suggestions).
 struct Completion {
-    /// Position (en octets) du début du mot complété dans la saisie.
+    /// Position (in bytes) of the start of the completed word in the input.
     start: usize,
     candidates: Vec<String>,
     index: usize,
-    /// Texte de la saisie juste après notre complétion : s'il change, on repart de zéro.
+    /// Input text right after our completion: if it changes, we start over.
     applied: String,
 }
 
-/// Message à envoyer.
+/// Message to send.
 pub struct Outgoing {
     pub text: String,
     pub reply_to: Option<ReplyTarget>,
@@ -137,24 +137,24 @@ pub struct ChatPanel {
     next_seq: u64,
     input: String,
     my_login: Option<String>,
-    /// Emotes Twitch utilisables par moi (pour reconnaître celles de mes messages).
+    /// Twitch emotes I can use (to recognise those in my own messages).
     user_emotes: EmoteMap,
-    /// Emotes 7TV, BTTV et FFZ.
+    /// 7TV, BTTV and FFZ emotes.
     third_party: EmoteMap,
     badges: HashMap<Badge, BadgeImage>,
-    /// Pseudos récemment actifs, le plus récent à la fin.
+    /// Recently active nicknames, the most recent at the end.
     chatters: VecDeque<String>,
     completion: Option<Completion>,
-    /// Lien cliqué, en attente de confirmation avant ouverture.
+    /// Clicked link, waiting for confirmation before opening.
     pending_link: Option<String>,
-    /// Message auquel on est en train de répondre.
+    /// Message being replied to.
     replying: Option<ReplyTarget>,
     line_menu: Option<LineMenu>,
     focus_input: bool,
-    /// Boutons de messages enregistrés et emotes favorites (copie de la config).
+    /// Saved-message buttons and favourite emotes (a copy of the config).
     saved_messages: Vec<SavedMessage>,
     favorites: Vec<String>,
-    /// Vrai quand les raccourcis ont changé et doivent être enregistrés.
+    /// True when the shortcuts changed and must be saved.
     shortcuts_changed: bool,
     bar_collapsed: bool,
     picker: Picker,
@@ -163,17 +163,17 @@ pub struct ChatPanel {
     animate: bool,
 }
 
-/// Ce que le dessin des lignes doit signaler au panneau.
+/// What the drawing of the lines must signal to the panel.
 #[derive(Default)]
 struct DrawOutput {
-    /// Délai avant la prochaine frame d'une emote animée visible.
+    /// Delay before the next frame of a visible animated emote.
     next_repaint: Option<f64>,
     clicked_link: Option<String>,
     reply: Option<ReplyTarget>,
     menu: Option<LineMenu>,
 }
 
-/// Menu ouvert par un clic droit sur un message.
+/// Menu opened by a right click on a message.
 struct LineMenu {
     pos: Pos2,
     target: ReplyTarget,
@@ -247,7 +247,7 @@ impl ChatPanel {
         self.favorites = favorites;
     }
 
-    /// Raccourcis modifiés depuis l'interface, à enregistrer dans la config.
+    /// Shortcuts modified from the interface, to be saved in the config.
     pub fn take_shortcuts_change(&mut self) -> Option<(Vec<SavedMessage>, Vec<String>)> {
         std::mem::take(&mut self.shortcuts_changed)
             .then(|| (self.saved_messages.clone(), self.favorites.clone()))
@@ -275,9 +275,9 @@ impl ChatPanel {
     pub fn push_message(&mut self, message: ChatMessage) {
         let own = message.own;
         let art = is_ascii_art(&message.text);
-        // Les emotes 7TV/BTTV/FFZ se reconnaissent par leur nom dans tous les messages.
-        // Twitch ne renvoie pas nos propres messages, donc ni la position de leurs
-        // emotes Twitch : on les reconnaît aussi par leur nom.
+        // 7TV/BTTV/FFZ emotes are recognised by their name in all messages.
+        // Twitch does not send our own messages back, hence neither the position of their
+        // Twitch emotes: they are recognised by their name too.
         let lookup = |word: &str| {
             let twitch = own.then(|| self.user_emotes.get(word)).flatten();
             twitch.or_else(|| self.third_party.get(word)).cloned()
@@ -334,7 +334,7 @@ impl ChatPanel {
         };
         for line in self.lines.iter_mut().filter(|l| matches(l)) {
             line.deleted = true;
-            line.height.set(0.0); // à remesurer
+            line.height.set(0.0); // to be measured again
         }
     }
 
@@ -347,7 +347,7 @@ impl ChatPanel {
         }
     }
 
-    // ---------- Autocomplétion ----------
+    // ---------- Autocompletion ----------
 
     fn emote_named(&self, name: &str) -> Option<&Emote> {
         self.user_emotes
@@ -355,7 +355,7 @@ impl ChatPanel {
             .or_else(|| self.third_party.get(name))
     }
 
-    /// Propositions pour `word` : emotes puis pseudos (ou seulement les pseudos avec `@`).
+    /// Suggestions for `word`: emotes then nicknames (or only nicknames with `@`).
     fn candidates(&self, word: &str) -> Vec<String> {
         let lower = word.to_lowercase();
         let chatters = |prefix: &str| -> Vec<String> {
@@ -390,7 +390,7 @@ impl ChatPanel {
         out
     }
 
-    /// Complète le dernier mot de la saisie. Renvoie `true` si la saisie a changé.
+    /// Completes the last word of the input. Returns `true` if the input changed.
     fn complete(&mut self, backwards: bool) -> bool {
         if let Some(completion) = &mut self.completion
             && completion.applied == self.input
@@ -427,7 +427,7 @@ impl ChatPanel {
         true
     }
 
-    /// Prépare une réponse : « @pseudo » au début de la saisie, curseur à la fin.
+    /// Prepares a reply: "@nickname" at the start of the input, cursor at the end.
     fn start_reply(&mut self, target: ReplyTarget) {
         let mention = format!("@{} ", target.name);
         if !self.input.starts_with(&mention) {
@@ -439,7 +439,7 @@ impl ChatPanel {
 
     // ---------- Affichage ----------
 
-    /// Dessine le panneau. Renvoie le message à envoyer quand on appuie sur Entrée.
+    /// Draws the panel. Returns the message to send when Enter is pressed.
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -460,7 +460,7 @@ impl ChatPanel {
                 move_cursor_to_end(ui.ctx(), id, &self.input);
             }
             if can_send && ui.memory(|m| m.has_focus(id)) {
-                // Tab est intercepté avant le champ de saisie, qui ne le voit donc pas.
+                // Tab is intercepted before the input field, which therefore does not see it.
                 let back = ui.input_mut(|i| i.consume_key(Modifiers::SHIFT, Key::Tab));
                 let forward = ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Tab));
                 if (forward || back) && self.complete(back) {
@@ -474,9 +474,9 @@ impl ChatPanel {
             };
             let edit = egui::TextEdit::singleline(&mut self.input)
                 .id(id)
-                // Tab ne fait pas quitter le champ (il sert à l'autocomplétion).
+                // Tab does not leave the field (it is used for autocompletion).
                 .lock_focus(true)
-                // Un peu plus haut que par défaut, plus confortable.
+                // A bit taller than the default, more comfortable.
                 .margin(egui::Margin::symmetric(8, 7))
                 .hint_text(hint)
                 .char_limit(500)
@@ -519,7 +519,7 @@ impl ChatPanel {
         to_send
     }
 
-    /// Liste des messages (seules les lignes visibles sont dessinées).
+    /// List of messages (only the visible lines are drawn).
     fn messages_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -531,7 +531,7 @@ impl ChatPanel {
         let scroll_to_bottom = std::mem::take(&mut self.scroll_to_bottom);
         let area = egui::ScrollArea::vertical()
             .auto_shrink([false, false])
-            // Reste collé en bas… sauf si on remonte dans l'historique.
+            // Stays stuck to the bottom… unless one scrolls up in the history.
             .stick_to_bottom(true);
         let output = area.show_viewport(ui, |ui, viewport| {
             ui.visuals_mut().override_text_color = Some(TEXT_COLOR);
@@ -545,7 +545,7 @@ impl ChatPanel {
                 let measured = height > 0.0 && line.width.get() == width;
                 let visible = y + height >= viewport.min.y - margin && y <= viewport.max.y + margin;
                 if measured && !visible {
-                    // Ligne hors écran : un simple espace de la bonne hauteur.
+                    // Off-screen line: a simple space of the right height.
                     ui.allocate_space(egui::vec2(width, height));
                 } else {
                     let rect = self.line_ui(ui, line, images, time, can_send, &mut out);
@@ -555,8 +555,8 @@ impl ChatPanel {
                 y += line.height.get() + spacing;
             }
             if scroll_to_bottom {
-                // Fait défiler jusqu'à la fin réelle du contenu (le défilement se
-                // « recolle » alors au bas du chat).
+                // Scrolls to the real end of the content (the scrolling then
+                // "sticks" back to the bottom of the chat).
                 ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
             }
         });
@@ -573,7 +573,7 @@ impl ChatPanel {
             self.start_reply(target);
         }
 
-        // Redessine juste à temps pour la prochaine frame des emotes animées visibles.
+        // Redraws just in time for the next frame of the visible animated emotes.
         if let Some(delay) = out.next_repaint {
             let delay = delay.max(MIN_FRAME_DELAY);
             ui.ctx()
@@ -596,7 +596,7 @@ impl ChatPanel {
         }
     }
 
-    /// Barre sous la saisie : messages enregistrés et emotes favorites.
+    /// Bar under the input: saved messages and favourite emotes.
     fn shortcuts_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -610,10 +610,10 @@ impl ChatPanel {
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
             let toggle = if self.bar_collapsed {
-                // Repliée : petite flèche, inchangée.
+                // Collapsed: small arrow, unchanged.
                 ui.small_button(style::icon(icon::CARET_RIGHT))
             } else {
-                // Dépliée : même hauteur que les boutons à côté.
+                // Expanded: same height as the buttons next to it.
                 ui.add(egui::Button::new(style::icon(icon::CARET_DOWN)))
             };
             if toggle
@@ -684,7 +684,7 @@ impl ChatPanel {
                                 .image(frame.texture, image_rect, frame.uv, Color32::WHITE);
                             response
                         }
-                        // Emote introuvable (pas encore chargée, ou retirée de la chaîne).
+                        // Emote not found (not loaded yet, or removed from the channel).
                         None => ui.add(egui::Button::new(name.as_str()).small()),
                     };
                     let response = response.on_hover_text(format!(
@@ -704,7 +704,7 @@ impl ChatPanel {
                 } else {
                     "Emotes"
                 };
-                // Même hauteur (28 px) que les emotes favorites à côté.
+                // Same height (28 px) as the favourite emotes next to it.
                 if ui
                     .add(egui::Button::new(label).min_size(egui::vec2(0.0, 28.0)))
                     .on_hover_text("Parcourir toutes les emotes et choisir tes favorites")
@@ -728,7 +728,7 @@ impl ChatPanel {
         outgoing
     }
 
-    /// Ajoute du texte à la saisie (séparé par un espace) et y place le curseur.
+    /// Appends text to the input (separated by a space) and puts the cursor there.
     fn insert_text(&mut self, text: &str) {
         if !self.input.is_empty() && !self.input.ends_with(' ') {
             self.input.push(' ');
@@ -754,7 +754,7 @@ impl ChatPanel {
         }
     }
 
-    /// Menu du clic droit sur un message. Renvoie le message auquel répondre.
+    /// Right-click menu on a message. Returns the message to reply to.
     fn line_menu_ui(&mut self, ctx: &egui::Context) -> Option<ReplyTarget> {
         let menu = self.line_menu.as_ref()?;
         let mut close = false;
@@ -784,7 +784,7 @@ impl ChatPanel {
                     }
                 });
             });
-        // Un clic ailleurs ou Échap ferme le menu.
+        // A click elsewhere or Escape closes the menu.
         let clicked_outside =
             ctx.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer();
         if close || clicked_outside || ctx.input(|i| i.key_pressed(Key::Escape)) {
@@ -793,7 +793,7 @@ impl ChatPanel {
         reply
     }
 
-    /// Bandeau « Réponse à @pseudo » au-dessus de la saisie.
+    /// "Reply to @nickname" banner above the input.
     fn reply_bar_ui(&mut self, ui: &mut egui::Ui) {
         let Some(target) = &self.replying else {
             return;
@@ -817,7 +817,7 @@ impl ChatPanel {
         }
     }
 
-    /// Barre « Ouvrir ce lien ? » : montre le vrai domaine avant d'ouvrir le navigateur.
+    /// "Open this link?" bar: shows the real domain before opening the browser.
     fn link_confirmation_ui(&mut self, ui: &mut egui::Ui) {
         let Some(url) = self.pending_link.clone() else {
             return;
@@ -853,7 +853,7 @@ impl ChatPanel {
         }
     }
 
-    /// Bande des propositions d'autocomplétion, au-dessus de la saisie.
+    /// Strip of autocompletion suggestions, above the input.
     fn suggestions_ui(&self, ui: &mut egui::Ui, images: &mut ImageCache, time: f64) {
         let Some(completion) = self.completion.as_ref().filter(|c| c.applied == self.input) else {
             return;
@@ -891,7 +891,7 @@ impl ChatPanel {
         });
     }
 
-    /// Dessine une ligne et renvoie le rectangle occupé.
+    /// Draws a line and returns the rectangle it takes up.
     fn line_ui(
         &self,
         ui: &mut egui::Ui,
@@ -922,7 +922,7 @@ impl ChatPanel {
         };
         let (color, action, art) = (*color, *action, *art);
 
-        // Emplacement réservé sous le message : rempli au survol (fond plus clair).
+        // Space reserved under the message: filled on hover (lighter background).
         let hover_background = ui.painter().add(Shape::Noop);
         let mut frame = egui::Frame::new().inner_margin(2.0);
         if *first {
@@ -932,10 +932,10 @@ impl ChatPanel {
         }
         let rect = frame
             .show(ui, |ui| {
-                // Fond (survol, premier message, mention) sur toute la largeur du chat.
+                // Background (hover, first message, mention) over the whole width of the chat.
                 ui.set_min_width(ui.available_width());
-                // Les boutons du survol ont leur propre marge à droite : le texte
-                // ne passe jamais dessous.
+                // The hover buttons have their own margin on the right: the text
+                // never goes under them.
                 let content_width = (ui.available_width() - ACTIONS_WIDTH).max(80.0);
                 ui.scope(|ui| {
                     ui.set_max_width(content_width);
@@ -959,8 +959,8 @@ impl ChatPanel {
                         );
                     }
                     if art && !line.deleted {
-                        // Pseudo et premier dessin partagent le même haut ; le reste du
-                        // dessin s'aligne dessous, sous le pseudo.
+                        // The nickname and the first drawing share the same top; the rest of the
+                        // drawing lines up below, under the nickname.
                         ui.horizontal_top(|ui| {
                             ui.spacing_mut().item_spacing.x = 0.0;
                             self.header_ui(ui, badges, name, color, action, images, time);
@@ -991,7 +991,7 @@ impl ChatPanel {
             ui.painter()
                 .set(hover_background, Shape::rect_filled(rect, 3.0, HOVER_BG));
             self.hover_actions_ui(ui, line, rect, can_reply, out);
-            // Clic droit n'importe où sur le message : menu Copier / Répondre.
+            // Right click anywhere on the message: Copy / Reply menu.
             if ui.input(|i| i.pointer.secondary_clicked())
                 && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
             {
@@ -1021,7 +1021,7 @@ impl ChatPanel {
         time: f64,
         out: &mut DrawOutput,
     ) {
-        // Dernière emote dessinée : une emote zero-width se pose par-dessus.
+        // Last emote drawn: a zero-width emote lands on top of it.
         let mut last_emote: Option<Rect> = None;
         for segment in segments {
             match segment {
@@ -1034,8 +1034,8 @@ impl ChatPanel {
                     if !text.trim().is_empty() {
                         last_emote = None;
                     }
-                    // Un mot par étiquette : le retour à la ligne se fait entre
-                    // les mots, comme sur Twitch (seuls les mots très longs sont coupés).
+                    // One label per word: the line break happens between
+                    // words, as on Twitch (only very long words are cut).
                     for word in text.split_inclusive(' ') {
                         let mut rich = RichText::new(word);
                         if action {
@@ -1056,7 +1056,7 @@ impl ChatPanel {
                                     .image(frame.texture, rect, frame.uv, Color32::WHITE);
                             }
                         }
-                        // En chargement, ou inconnu de Twemoji : le caractère en texte.
+                        // Loading, or unknown to Twemoji: the character as text.
                         None => {
                             ui.add(
                                 egui::Label::new(text.as_str())
@@ -1094,7 +1094,7 @@ impl ChatPanel {
                             last_emote = Some(rect);
                         }
                     }
-                    // Pas encore chargée : son nom en attendant.
+                    // Not loaded yet: its name in the meantime.
                     None => {
                         ui.label(RichText::new(name).weak());
                         last_emote = None;
@@ -1104,7 +1104,7 @@ impl ChatPanel {
         }
     }
 
-    /// Badges, pseudo et deux-points, dans le même alignement que le texte du message.
+    /// Badges, nickname and colon, aligned like the message text.
     #[allow(clippy::too_many_arguments)]
     fn header_ui(
         &self,
@@ -1134,7 +1134,7 @@ impl ChatPanel {
         ui.label(if action { " " } else { ": " });
     }
 
-    /// Boutons « Copier » et « Répondre » en haut à droite du message survolé.
+    /// "Copy" and "Reply" buttons at the top right of the hovered message.
     fn hover_actions_ui(
         &self,
         ui: &mut egui::Ui,
@@ -1193,9 +1193,9 @@ impl ChatPanel {
         }
     }
 
-    /// Dessine une emote (la frame du moment si elle est animée). Avec `overlay_on`,
-    /// elle est centrée sur cette zone (emote zero-width) sans prendre de place.
-    /// Au survol : fond plus clair et nom de l'emote affiché au-dessus.
+    /// Draws an emote (the current frame if it is animated). With `overlay_on`,
+    /// it is centred on that area (zero-width emote) without taking up space.
+    /// On hover: lighter background and the emote's name shown above.
     fn paint_emote(
         &self,
         ui: &mut egui::Ui,
@@ -1214,7 +1214,7 @@ impl ChatPanel {
                 (rect, response.hovered())
             }
         };
-        // Seules les emotes visibles à l'écran sont dessinées et animées.
+        // Only the emotes visible on screen are drawn and animated.
         if ui.is_rect_visible(rect) {
             if hovered {
                 ui.painter()
@@ -1237,7 +1237,7 @@ enum Icon {
     Reply,
 }
 
-/// Nom de l'emote (et son service) affiché au-dessus d'elle, dans la colonne du chat.
+/// The emote's name (and its service) shown above it, in the chat column.
 fn emote_tooltip(ui: &egui::Ui, rect: Rect, name: &str, provider: &str) {
     let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("survol_emote"));
     let painter = ui.ctx().layer_painter(layer);
@@ -1249,7 +1249,7 @@ fn emote_tooltip(ui: &egui::Ui, rect: Rect, name: &str, provider: &str) {
     );
     let width = title.size().x.max(subtitle.size().x);
     let height = title.size().y + subtitle.size().y;
-    // Au-dessus de l'emote, sans dépasser à gauche de la colonne (la vidéo est là).
+    // Above the emote, without going past the left of the column (the video is there).
     let left = ui.clip_rect().left() + 2.0;
     let x = (rect.center().x - width / 2.0).max(left);
     let top = rect.top() - height - 10.0;
@@ -1270,7 +1270,7 @@ fn emote_tooltip(ui: &egui::Ui, rect: Rect, name: &str, provider: &str) {
     );
 }
 
-/// Message composé surtout de caractères braille (U+2800 à U+28FF) : de l'art ASCII.
+/// Message made mostly of braille characters (U+2800 to U+28FF): ASCII art.
 fn is_ascii_art(text: &str) -> bool {
     let visible = text.chars().filter(|c| !c.is_whitespace()).count();
     let braille = text
@@ -1280,7 +1280,7 @@ fn is_ascii_art(text: &str) -> bool {
     visible >= 20 && braille * 10 >= visible * 8
 }
 
-/// Coupe un texte trop long (en caractères) et ajoute « … ».
+/// Cuts a text that is too long (in characters) and adds "…".
 fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_owned()
@@ -1291,8 +1291,8 @@ fn truncate(text: &str, max: usize) -> String {
     }
 }
 
-/// Mot court : jamais coupé (il passe à la ligne entier). Mot très long (lien…) :
-/// coupé où il faut pour rester entièrement visible.
+/// Short word: never cut (it wraps whole). Very long word (link…):
+/// cut where needed to stay entirely visible.
 fn wrap_mode(word: &str) -> egui::TextWrapMode {
     if word.chars().count() > LONG_WORD {
         egui::TextWrapMode::Wrap
@@ -1301,7 +1301,7 @@ fn wrap_mode(word: &str) -> egui::TextWrapMode {
     }
 }
 
-/// Place le curseur de la zone de saisie à la fin du texte.
+/// Puts the cursor of the input area at the end of the text.
 fn move_cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
     if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
         let end = CCursor::new(text.chars().count());
@@ -1310,19 +1310,19 @@ fn move_cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
     }
 }
 
-/// Les identifiants d'emotes Twitch ne contiennent que lettres, chiffres et `_`.
+/// Twitch emote identifiers only contain letters, digits and `_`.
 fn is_valid_emote_id(id: &str) -> bool {
     !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
-/// `default` : GIF si l'emote est animée, PNG sinon.
+/// `default`: GIF if the emote is animated, PNG otherwise.
 fn twitch_emote_url(id: &str) -> String {
     format!("https://static-cdn.jtvnw.net/emoticons/v2/{id}/default/dark/1.0")
 }
 
-/// Découpe le texte en morceaux de texte et d'emotes.
-/// `positions` : emotes Twitch avec leur position (en caractères), fournies par Twitch.
-/// `lookup` : emotes à reconnaître par leur nom (mot entier).
+/// Splits the text into pieces of text and emotes.
+/// `positions`: Twitch emotes with their position (in characters), provided by Twitch.
+/// `lookup`: emotes to recognise by their name (whole word).
 fn build_segments(
     text: &str,
     positions: &[(String, usize, usize)],
@@ -1332,7 +1332,7 @@ fn build_segments(
     let mut segments = Vec::new();
     let mut pos = 0;
     for (id, start, end) in positions {
-        // Positions incohérentes (chevauchement, hors du texte) : ignorées.
+        // Inconsistent positions (overlapping, outside the text): ignored.
         if *start < pos || *end >= chars.len() || !is_valid_emote_id(id) {
             continue;
         }
@@ -1368,8 +1368,8 @@ fn push_words(segments: &mut Vec<Segment>, text: &str, lookup: &dyn Fn(&str) -> 
         }
         match lookup(word) {
             Some(emote) => {
-                // Une emote zero-width se pose sur l'emote précédente, même séparée
-                // par un espace : on retire cet espace.
+                // A zero-width emote lands on the previous emote, even separated
+                // by a space: that space is removed.
                 if emote.zero_width
                     && matches!(segments.as_slice(),
                         [.., Segment::Emote { .. }, Segment::Text(t)] if t.trim().is_empty())
@@ -1398,7 +1398,7 @@ fn push_words(segments: &mut Vec<Segment>, text: &str, lookup: &dyn Fn(&str) -> 
     }
 }
 
-/// Ajoute du texte, en le collant au morceau de texte précédent s'il y en a un.
+/// Appends text, gluing it to the previous piece of text if there is one.
 fn append_text(segments: &mut Vec<Segment>, text: &str) {
     if text.is_empty() {
         return;
@@ -1410,7 +1410,7 @@ fn append_text(segments: &mut Vec<Segment>, text: &str) {
     }
 }
 
-/// Vrai si `text` contient `login` comme mot entier (ex. « @somechannel » ou « salut somechannel »).
+/// True if `text` contains `login` as a whole word (e.g. "@alice" or "hi alice").
 fn mentions(text: &str, login: &str) -> bool {
     let is_word = |c: char| c.is_alphanumeric() || c == '_';
     let text = text.to_lowercase();
@@ -1422,7 +1422,7 @@ fn mentions(text: &str, login: &str) -> bool {
     })
 }
 
-/// Couleur du pseudo, éclaircie si elle est trop sombre pour le fond foncé.
+/// Colour of the nickname, lightened if it is too dark for the dark background.
 fn readable_color(color: Option<[u8; 3]>, login: &str) -> Color32 {
     let [r, g, b] = color.unwrap_or_else(|| {
         let hash = login
@@ -1433,7 +1433,7 @@ fn readable_color(color: Option<[u8; 3]>, login: &str) -> Color32 {
     let luminance = 0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b);
     let lighten = |c: u8| {
         if luminance < 110.0 {
-            // Mélange avec du blanc, d'autant plus que la couleur est sombre.
+            // Mixes with white, the more so the darker the colour.
             let k = (110.0 - luminance) / 160.0;
             (f32::from(c) + (255.0 - f32::from(c)) * k).round() as u8
         } else {
@@ -1474,7 +1474,7 @@ mod tests {
     #[test]
     fn segments_avec_positions() {
         let none = |_: &str| None;
-        // « é » compte pour un seul caractère : les positions Twitch sont en caractères.
+        // "é" counts as a single character: Twitch positions are in characters.
         let s = build_segments("é Kappa ok", &[("25".into(), 2, 6)], &none);
         assert_eq!(
             s,
@@ -1484,7 +1484,7 @@ mod tests {
                 Segment::Text(" ok".into())
             ]
         );
-        // Position hors du texte : ignorée sans planter.
+        // Position outside the text: ignored without crashing.
         let s = build_segments("hi", &[("25".into(), 0, 50)], &none);
         assert_eq!(s, [Segment::Text("hi".into())]);
     }
@@ -1500,7 +1500,7 @@ mod tests {
         assert_eq!(s.len(), 4);
         assert_eq!(s[0], Segment::Text("lol ".into()));
         assert!(matches!(&s[1], Segment::Emote { name, .. } if name == "KEKW"));
-        // L'espace entre KEKW et RainTime a été retiré : RainTime se superpose à KEKW.
+        // The space between KEKW and RainTime was removed: RainTime lands on KEKW.
         assert!(
             matches!(&s[2], Segment::Emote { name, zero_width: true, .. } if name == "RainTime")
         );
@@ -1510,7 +1510,11 @@ mod tests {
     #[test]
     fn liens() {
         let none = |_: &str| None;
-        let s = build_segments("clip https://www.twitch.tv/somechannel/clip/Abc ok", &[], &none);
+        let s = build_segments(
+            "clip https://www.twitch.tv/somechannel/clip/Abc ok",
+            &[],
+            &none,
+        );
         assert_eq!(
             s,
             [
@@ -1519,7 +1523,7 @@ mod tests {
                 Segment::Text(" ok".into())
             ]
         );
-        // Pas une adresse web : texte normal.
+        // Not a web address: normal text.
         let s = build_segments("javascript:alert(1)", &[], &none);
         assert_eq!(s, [Segment::Text("javascript:alert(1)".into())]);
     }

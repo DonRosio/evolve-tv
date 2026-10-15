@@ -1,10 +1,10 @@
-//! Connexion au compte Twitch par « Device Code Flow » et stockage du jeton dans
-//! le trousseau GNOME (Secret Service).
+//! Twitch account login with the "Device Code Flow" and storage of the token in
+//! the GNOME keyring (Secret Service).
 //!
-//! Déroulement : l'application demande un code à Twitch, tu le valides sur
-//! twitch.tv/activate dans ton navigateur, et l'application reçoit un jeton
-//! d'accès (valable ~4 h) et un jeton de renouvellement. Aucun mot de passe ni
-//! secret ne transite par l'application.
+//! How it goes: the application asks Twitch for a code, you validate it on
+//! twitch.tv/activate in your browser, and the application receives an access
+//! token (valid ~4 h) and a refresh token. No password or
+//! secret goes through the application.
 
 use std::sync::OnceLock;
 
@@ -13,21 +13,21 @@ use serde::{Deserialize, Serialize};
 
 use crate::http;
 
-/// Droits demandés : lire et écrire dans le chat, connaître tes emotes.
+/// Requested rights: read and write in the chat, know your emotes.
 pub const SCOPES: &str = "chat:read chat:edit user:read:emotes";
 const REQUIRED_SCOPES: [&str; 2] = ["chat:read", "chat:edit"];
 
 const KEYRING_SERVICE: &str = "evolve-tv";
 const KEYRING_ACCOUNT: &str = "twitch";
 
-/// Jetons OAuth. Volontairement sans `Debug` : impossible de les afficher par erreur.
+/// OAuth tokens. Deliberately without `Debug`: they cannot be printed by mistake.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Tokens {
     pub access_token: String,
     pub refresh_token: String,
 }
 
-/// Identité du compte, renvoyée par Twitch quand on vérifie le jeton.
+/// Identity of the account, returned by Twitch when the token is checked.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Identity {
     pub login: String,
@@ -37,7 +37,7 @@ pub struct Identity {
     pub scopes: Vec<String>,
 }
 
-/// Session connectée : jetons + identité.
+/// Logged-in session: tokens + identity.
 #[derive(Clone)]
 pub struct Session {
     pub tokens: Tokens,
@@ -46,9 +46,9 @@ pub struct Session {
 
 pub enum Outcome {
     LoggedIn(Session),
-    /// Pas de jeton, ou jeton révoqué : il faut se (re)connecter.
+    /// No token, or a revoked token: one must log in (again).
     LoggedOut,
-    /// Erreur temporaire (réseau…) : les jetons sont conservés, on réessaiera.
+    /// Temporary error (network…): the tokens are kept, we will try again.
     Failed(String),
 }
 
@@ -68,7 +68,7 @@ pub enum Poll {
     Expired,
 }
 
-/// Réponse d'erreur de id.twitch.tv : `{"status":400,"message":"authorization_pending"}`.
+/// Error response from id.twitch.tv: `{"status":400,"message":"authorization_pending"}`.
 #[derive(Deserialize)]
 struct ApiError {
     #[serde(default)]
@@ -78,7 +78,7 @@ struct ApiError {
 // ---------- Trousseau ----------
 
 fn keyring_entry() -> Result<Entry, String> {
-    // Le trousseau est initialisé une seule fois, au premier usage.
+    // The keyring is initialised only once, at first use.
     static INIT: OnceLock<Result<(), String>> = OnceLock::new();
     INIT.get_or_init(|| {
         let store = zbus_secret_service_keyring_store::Store::new()
@@ -116,7 +116,7 @@ pub fn delete_tokens() -> Result<(), String> {
 
 // ---------- API OAuth de Twitch ----------
 
-/// Étape 1 : demande un code à afficher à l'utilisateur.
+/// Step 1: asks for a code to show to the user.
 pub fn start_device_flow(client_id: &str) -> Result<DeviceCode, String> {
     let mut response = http::agent()
         .post("https://id.twitch.tv/oauth2/device")
@@ -133,7 +133,7 @@ pub fn start_device_flow(client_id: &str) -> Result<DeviceCode, String> {
         ));
     }
     let code: DeviceCode = http::read_json(&mut response)?;
-    // N'ouvre jamais dans le navigateur une adresse qui ne serait pas celle de Twitch.
+    // Never opens in the browser an address that is not Twitch's.
     if !code
         .verification_uri
         .starts_with("https://www.twitch.tv/activate")
@@ -143,7 +143,7 @@ pub fn start_device_flow(client_id: &str) -> Result<DeviceCode, String> {
     Ok(code)
 }
 
-/// Étape 2 : demande (toutes les `interval` secondes) si l'utilisateur a validé le code.
+/// Step 2: asks (every `interval` seconds) whether the user has validated the code.
 pub fn poll_device_flow(client_id: &str, device_code: &str) -> Result<Poll, String> {
     let mut response = http::agent()
         .post("https://id.twitch.tv/oauth2/token")
@@ -166,15 +166,15 @@ pub fn poll_device_flow(client_id: &str, device_code: &str) -> Result<Poll, Stri
     }
 }
 
-/// Résultat d'un renouvellement de jeton.
+/// Result of a token renewal.
 enum Refresh {
     Ok(Tokens),
-    /// Jeton de renouvellement refusé : il faut se reconnecter.
+    /// Refresh token refused: one must log in again.
     Rejected,
 }
 
 fn refresh(client_id: &str, refresh_token: &str) -> Result<Refresh, String> {
-    // Client « Public » : pas de secret, seulement l'identifiant de l'application.
+    // "Public" client: no secret, only the application's identifier.
     let mut response = http::agent()
         .post("https://id.twitch.tv/oauth2/token")
         .send_form([
@@ -190,8 +190,8 @@ fn refresh(client_id: &str, refresh_token: &str) -> Result<Refresh, String> {
     }
 }
 
-/// Vérifie le jeton auprès de Twitch (obligatoire au démarrage puis toutes les heures).
-/// `Ok(None)` : jeton expiré ou révoqué.
+/// Checks the token with Twitch (mandatory at start-up, then every hour).
+/// `Ok(None)`: expired or revoked token.
 fn validate(access_token: &str) -> Result<Option<Identity>, String> {
     let mut response = http::agent()
         .get("https://id.twitch.tv/oauth2/validate")
@@ -205,19 +205,19 @@ fn validate(access_token: &str) -> Result<Option<Identity>, String> {
     }
 }
 
-/// Révoque le jeton chez Twitch (déconnexion). Les erreurs sont ignorées :
-/// le jeton est de toute façon supprimé du trousseau.
+/// Revokes the token at Twitch (logout). Errors are ignored:
+/// the token is deleted from the keyring anyway.
 pub fn revoke(client_id: &str, access_token: &str) {
     let _ = http::agent()
         .post("https://id.twitch.tv/oauth2/revoke")
         .send_form([("client_id", client_id), ("token", access_token)]);
 }
 
-/// Vérifie des jetons, les renouvelle si besoin et enregistre les nouveaux.
+/// Checks tokens, renews them if needed and saves the new ones.
 pub fn check(client_id: &str, tokens: Tokens) -> Outcome {
     match validate(&tokens.access_token) {
         Ok(Some(identity)) => accept(client_id, tokens, identity),
-        // Jeton expiré : on le renouvelle.
+        // Expired token: renew it.
         Ok(None) => match refresh(client_id, &tokens.refresh_token) {
             Ok(Refresh::Ok(new_tokens)) => match save_tokens(&new_tokens) {
                 Ok(()) => check_fresh(client_id, new_tokens),
@@ -233,7 +233,7 @@ pub fn check(client_id: &str, tokens: Tokens) -> Outcome {
     }
 }
 
-/// Comme `check`, pour des jetons tout juste obtenus (pas de nouveau renouvellement).
+/// Like `check`, for tokens just obtained (no new renewal).
 pub fn check_fresh(client_id: &str, tokens: Tokens) -> Outcome {
     match validate(&tokens.access_token) {
         Ok(Some(identity)) => accept(client_id, tokens, identity),
@@ -246,13 +246,13 @@ fn accept(client_id: &str, tokens: Tokens, identity: Identity) -> Outcome {
     if is_usable(&identity, client_id) {
         Outcome::LoggedIn(Session { tokens, identity })
     } else {
-        // Jeton d'une autre application ou sans les droits du chat : inutilisable.
+        // Token of another application or without the chat rights: unusable.
         let _ = delete_tokens();
         Outcome::LoggedOut
     }
 }
 
-/// Au démarrage : relit le trousseau et vérifie les jetons.
+/// At start-up: reads the keyring again and checks the tokens.
 pub fn restore(client_id: &str) -> Outcome {
     match load_tokens() {
         Ok(Some(tokens)) => check(client_id, tokens),
@@ -261,7 +261,7 @@ pub fn restore(client_id: &str) -> Outcome {
     }
 }
 
-/// Le jeton doit venir de notre application et avoir les droits du chat.
+/// The token must come from our application and have the chat rights.
 fn is_usable(identity: &Identity, client_id: &str) -> bool {
     identity.client_id == client_id
         && REQUIRED_SCOPES

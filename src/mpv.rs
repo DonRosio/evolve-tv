@@ -1,5 +1,5 @@
-//! Lancement de mpv et pilotage par son interface IPC : des commandes JSON
-//! échangées sur un socket Unix (un « fichier » de communication local).
+//! Launching mpv and driving it through its IPC interface: JSON commands
+//! exchanged over a Unix socket (a local communication "file").
 
 use std::ffi::OsString;
 use std::fs;
@@ -12,40 +12,40 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-/// Où mpv affiche la vidéo.
+/// Where mpv displays the video.
 pub enum Placement {
-    /// Dans la fenêtre X11 dont on donne l'identifiant (vidéo intégrée).
+    /// In the X11 window whose identifier is given (embedded video).
     Embedded(u32),
-    /// Dans sa propre fenêtre.
+    /// In its own window.
     Detached,
 }
 
 #[derive(Debug)]
 pub enum MpvEvent {
-    /// Connexion IPC établie : canal d'écriture pour envoyer des commandes.
+    /// IPC connection established: write channel to send commands.
     Connected(UnixStream),
     Volume(f64),
-    /// Son coupé ou rétabli.
+    /// Sound muted or restored.
     Mute(bool),
-    /// Fin de lecture : `"eof"` (flux terminé), `"quit"` (fenêtre fermée), `"error"`…
+    /// End of playback: `"eof"` (stream ended), `"quit"` (window closed), `"error"`…
     EndFile(String),
 }
 
-/// Méthode d'affichage de la vidéo.
+/// Method used to display the video.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Output {
-    /// Interface X11 « XVideo » : très légère en mémoire, décodage par le processeur.
+    /// X11 "XVideo" interface: very light on memory, decoding by the processor.
     Xv,
-    /// OpenGL/EGL via la carte graphique.
+    /// OpenGL/EGL through the graphics card.
     Gpu {
         hardware_decoding: bool,
-        /// Ne charger que le pilote EGL NVIDIA : évite que Mesa (et ses 40 Mo
-        /// de LLVM) soit chargé pour rien quand le bureau tourne sur la NVIDIA.
+        /// Only load the NVIDIA EGL driver: avoids Mesa (and its 40 MB
+        /// of LLVM) being loaded for nothing when the desktop runs on the NVIDIA.
         nvidia_only: bool,
     },
 }
 
-/// Fichier de déclaration du pilote EGL NVIDIA (bibliothèque glvnd).
+/// Declaration file of the NVIDIA EGL driver (glvnd library).
 pub const NVIDIA_EGL_VENDOR: &str = "/usr/share/glvnd/egl_vendor.d/10_nvidia.json";
 
 pub struct Options<'a> {
@@ -57,7 +57,7 @@ pub struct Options<'a> {
     pub socket: PathBuf,
 }
 
-/// Un processus mpv en cours, fermé automatiquement à la destruction de la valeur.
+/// A mpv process in progress, closed automatically when the value is dropped.
 pub struct Mpv {
     child: Child,
     socket: PathBuf,
@@ -70,7 +70,7 @@ impl Mpv {
         options: Options,
         on_event: impl Fn(MpvEvent) + Send + 'static,
     ) -> Result<Mpv, String> {
-        // mpv ne doit lire que le serveur local de streamlink.
+        // mpv must only read streamlink's local server.
         if !options.url.starts_with("http://127.0.0.1:") {
             return Err(format!("adresse de flux refusée : {}", options.url));
         }
@@ -81,7 +81,7 @@ impl Mpv {
 
         let mut command = Command::new(options.program);
         command
-            // Sécurité et reproductibilité : ni config utilisateur, ni scripts, ni youtube-dl.
+            // Security and reproducibility: no user config, no scripts, no youtube-dl.
             .args([
                 "--no-config",
                 "--load-scripts=no",
@@ -91,9 +91,9 @@ impl Mpv {
             .arg(ipc_arg)
             .args(["--force-window=immediate", "--keep-open=no", "--idle=no"])
             .args(["--volume-max=100", &format!("--volume={}", options.volume)])
-            // Plafonne le tampon du flux en mémoire (défaut de mpv : 150 + 50 Mio).
-            // En faible latence, il ne contient que ~3 s de vidéo (~3 Mio en 1080p60) ;
-            // mesuré : 32 Mio faisait grimper mpv à ~240 Mo, 8 Mio le stabilise à ~197 Mo.
+            // Caps the stream buffer in memory (mpv's default: 150 + 50 MiB).
+            // In low latency, it only holds ~3 s of video (~3 MiB at 1080p60);
+            // measured: 32 MiB made mpv climb to ~240 MB, 8 MiB keeps it stable at ~197 MB.
             .args(["--demuxer-max-bytes=8MiB", "--demuxer-max-back-bytes=1MiB"]);
         match options.placement {
             Placement::Embedded(window) => {
@@ -151,7 +151,7 @@ impl Mpv {
         self.ipc = Some(stream);
     }
 
-    /// Envoie une commande, par exemple `json!(["cycle", "pause"])`.
+    /// Sends a command, for example `json!(["cycle", "pause"])`.
     pub fn command(&mut self, command: Value) {
         if let Some(ipc) = &mut self.ipc
             && send(ipc, command).is_err()
@@ -167,7 +167,7 @@ impl Mpv {
 
 impl Drop for Mpv {
     fn drop(&mut self) {
-        // On demande poliment à mpv de quitter, puis on force s'il traîne.
+        // We ask mpv politely to quit, then force it if it lingers.
         self.command(json!(["quit"]));
         let deadline = Instant::now() + Duration::from_millis(500);
         while Instant::now() < deadline {
@@ -188,9 +188,9 @@ fn send(stream: &mut UnixStream, command: Value) -> io::Result<()> {
     stream.write_all(line.as_bytes())
 }
 
-/// Thread qui se connecte au socket de mpv et transmet ses événements.
+/// Thread that connects to mpv's socket and forwards its events.
 fn ipc_loop(socket: &Path, on_event: impl Fn(MpvEvent)) {
-    // mpv met un court instant à créer le socket : on réessaie pendant 10 s.
+    // mpv takes a short moment to create the socket: we retry for 10 s.
     let deadline = Instant::now() + Duration::from_secs(10);
     let stream = loop {
         match UnixStream::connect(socket) {
@@ -199,8 +199,8 @@ fn ipc_loop(socket: &Path, on_event: impl Fn(MpvEvent)) {
             Err(_) => return,
         }
     };
-    // `try_clone` crée un second accès au même socket : un pour lire ici,
-    // un pour écrire depuis l'interface.
+    // `try_clone` creates a second access to the same socket: one to read here,
+    // one to write from the interface.
     let Ok(mut writer) = stream.try_clone() else {
         return;
     };

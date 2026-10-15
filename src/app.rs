@@ -1,4 +1,4 @@
-//! Fenêtre principale : contrôles en haut, vidéo au centre, chat à droite.
+//! Main window: controls at the top, video in the middle, chat on the right.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,22 +18,22 @@ use crate::streamlink::{self, Server, ServerEvent};
 use crate::video_surface::VideoSurface;
 use crate::{network, paths, style};
 
-/// Messages envoyés par les threads de fond vers l'interface.
+/// Messages sent by the background threads to the interface.
 ///
-/// Les threads ne touchent jamais directement à l'état de l'application (Rust
-/// l'interdirait sans verrou) : ils envoient un message dans un canal, que
-/// l'interface lit au début de chaque image.
+/// The threads never touch the application's state directly (Rust would forbid it
+/// without a lock): they send a message through a channel, which the interface
+/// reads at the start of each frame.
 enum Event {
     Network(Option<String>),
-    /// Le numéro identifie la session : les messages d'un ancien streamlink sont ignorés.
+    /// The number identifies the session: messages from an old streamlink are ignored.
     Server(u64, ServerEvent),
-    /// Idem pour les instances de mpv.
+    /// Same for mpv instances.
     Mpv(u64, MpvEvent),
 }
 
-/// Qualités Twitch habituelles, proposées quand la chaîne est hors ligne (la vraie
-/// liste n'est connue qu'au début du live). Une qualité absente est remplacée par
-/// la meilleure possible du profil.
+/// Usual Twitch qualities, offered when the channel is offline (the real list is
+/// only known once the stream starts). A missing quality is replaced by the best
+/// one possible for the profile.
 const TYPICAL_QUALITIES: [&str; 7] = [
     "1080p60",
     "720p60",
@@ -44,7 +44,7 @@ const TYPICAL_QUALITIES: [&str; 7] = [
     "audio_only",
 ];
 
-/// En sortie vidéo `auto`, hauteur maximale affichée par Xv (au-delà : GPU).
+/// With the `auto` video output, the maximum height displayed by Xv (above it: GPU).
 const XV_MAX_HEIGHT: u32 = 480;
 
 enum Status {
@@ -55,18 +55,18 @@ enum Status {
     Error(String),
 }
 
-/// Un visionnage en cours : streamlink, puis mpv quand le flux est prêt.
+/// A viewing in progress: streamlink, then mpv once the stream is ready.
 struct Session {
     id: u64,
-    // Les champs sont détruits dans l'ordre de déclaration : mpv d'abord, puis streamlink.
+    // The fields are dropped in declaration order: mpv first, then streamlink.
     mpv: Option<(u64, Mpv)>,
     server: Server,
-    /// Liste de qualités transmise à streamlink (la première disponible est jouée).
+    /// List of qualities handed to streamlink (the first available one is played).
     qualities: Vec<String>,
     url: Option<String>,
     playing_quality: Option<String>,
     last_error: Option<String>,
-    /// Raison de la dernière fin de lecture signalée par mpv.
+    /// Reason for the last end of playback reported by mpv.
     end_reason: Option<String>,
 }
 
@@ -76,17 +76,17 @@ pub struct EvolveApp {
     rx: Receiver<Event>,
 
     config: Config,
-    /// Erreur de lecture de la config : on utilise alors les valeurs par défaut
-    /// sans jamais réécrire le fichier, pour ne pas effacer tes modifications.
+    /// Error reading the config: the default values are used then,
+    /// without ever rewriting the file, so as not to erase your changes.
     config_error: Option<String>,
     config_dirty: bool,
     streamlink_program: Option<PathBuf>,
     mpv_program: Option<PathBuf>,
-    /// Le bureau est affiché par le pilote NVIDIA (voir `display_uses_nvidia`).
+    /// The desktop is drawn by the NVIDIA driver (see `display_uses_nvidia`).
     nvidia_display: bool,
 
     profile: usize,
-    /// Qualité choisie à la main (`None` : automatique selon le profil).
+    /// Quality chosen by hand (`None`: automatic, according to the profile).
     quality: Option<String>,
     available: Vec<String>,
     wifi: Option<String>,
@@ -100,11 +100,11 @@ pub struct EvolveApp {
     surface: Option<VideoSurface>,
     embed_error: Option<String>,
     detached: bool,
-    /// Plein écran « vidéo seule » (touche F).
+    /// "Video only" full screen (F key).
     fullscreen: bool,
-    /// Fenêtre en plein écran sans rien masquer (touche F11).
+    /// Window in full screen without hiding anything (F11 key).
     window_fullscreen: bool,
-    /// Mode théâtre : barres du haut et du bas masquées (vidéo + chat + contrôles).
+    /// Theatre mode: top and bottom bars hidden (video + chat + controls).
     theater: bool,
     paused: bool,
     muted: bool,
@@ -129,7 +129,7 @@ impl EvolveApp {
             paths::find_program("streamlink", config.player.streamlink_path.as_deref());
         let mpv_program = paths::find_program("mpv", config.player.mpv_path.as_deref());
 
-        // Détection du Wi-Fi en arrière-plan ; le stream démarre quand elle répond.
+        // Wi-Fi detection in the background; the stream starts when it answers.
         let (tx_net, ctx) = (tx.clone(), cc.egui_ctx.clone());
         thread::spawn(move || {
             let _ = tx_net.send(Event::Network(network::current_wifi()));
@@ -169,9 +169,9 @@ impl EvolveApp {
         }
     }
 
-    // ---------- Gestion du visionnage ----------
+    // ---------- Managing the viewing ----------
 
-    /// (Re)lance streamlink avec le profil et la qualité actuels.
+    /// Starts (or restarts) streamlink with the current profile and quality.
     fn start(&mut self) {
         self.stop();
         let Some(program) = self.streamlink_program.clone() else {
@@ -216,15 +216,15 @@ impl EvolveApp {
     }
 
     fn stop(&mut self) {
-        // Détruire la session arrête mpv et streamlink (voir leurs `impl Drop`).
+        // Dropping the session stops mpv and streamlink (see their `impl Drop`).
         self.session = None;
         self.status = Status::Stopped;
         self.paused = false;
     }
 
-    /// Lance (ou relance) mpv sur le flux de la session, intégré ou détaché.
+    /// Starts (or restarts) mpv on the session's stream, embedded or detached.
     fn launch_mpv(&mut self) {
-        // Qualité jouée si streamlink l'a déjà annoncée, sinon celle qu'il va choisir.
+        // Quality played if streamlink has already announced it, otherwise the one it will pick.
         let Some(session) = &self.session else {
             return;
         };
@@ -240,7 +240,7 @@ impl EvolveApp {
         let Some(url) = session.url.clone() else {
             return;
         };
-        session.mpv = None; // ferme l'ancien mpv s'il y en a un
+        session.mpv = None; // close the old mpv if there is one
         session.end_reason = None;
         self.paused = false;
 
@@ -283,7 +283,7 @@ impl EvolveApp {
         }
     }
 
-    /// Sortie vidéo adaptée à une qualité donnée.
+    /// Video output suited to a given quality.
     fn output_for(&self, quality: Option<&str>) -> Output {
         let gpu = Output::Gpu {
             hardware_decoding: self.config.player.hardware_decoding,
@@ -337,7 +337,7 @@ impl EvolveApp {
                         let current = session.mpv.as_ref().map(|(_, mpv)| mpv.output());
                         session.playing_quality = Some(quality.clone());
                         self.status = Status::Playing;
-                        // Prévision ratée : on relance mpv avec la sortie adaptée.
+                        // Forecast failed: restart mpv with the suited output.
                         if current.is_some_and(|o| o != self.output_for(Some(&quality))) {
                             self.launch_mpv();
                         }
@@ -368,7 +368,7 @@ impl EvolveApp {
         }
     }
 
-    /// Vérifie si streamlink ou mpv se sont arrêtés d'eux-mêmes.
+    /// Checks whether streamlink or mpv stopped by themselves.
     fn poll_processes(&mut self) {
         let Some(session) = &mut self.session else {
             return;
@@ -390,7 +390,7 @@ impl EvolveApp {
 
         if reason.as_deref() == Some("quit") {
             if self.detached {
-                // Fenêtre vidéo détachée fermée : on rattache la vidéo à l'application.
+                // Detached video window closed: attach the video back to the application.
                 self.detached = false;
                 self.launch_mpv();
             } else {
@@ -401,7 +401,7 @@ impl EvolveApp {
             self.status =
                 Status::Error("mpv s'arrête en boucle : vérifie le flux ou la qualité".into());
         } else {
-            // Fin du live ou coupure : on relance tout, streamlink attendra le prochain live.
+            // End of the live or an interruption: restart everything, streamlink will wait for the next live.
             self.start();
         }
     }
@@ -436,8 +436,8 @@ impl EvolveApp {
         self.apply_viewport_fullscreen();
     }
 
-    /// F11 : la fenêtre passe en plein écran (sans barre de titre), la mise en page
-    /// reste la même (avec le mode théâtre : vidéo + chat + contrôles).
+    /// F11: the window goes full screen (no title bar), the layout
+    /// stays the same (with theatre mode: video + chat + controls).
     fn toggle_window_fullscreen(&mut self) {
         self.window_fullscreen = !self.window_fullscreen;
         self.apply_viewport_fullscreen();
@@ -451,8 +451,8 @@ impl EvolveApp {
 
     fn toggle_pause(&mut self) {
         if self.paused {
-            // En direct, reprendre là où on s'était arrêté accumulerait du retard :
-            // on reconnecte mpv pour revenir au direct, comme le site Twitch.
+            // Live, resuming where we stopped would accumulate lag:
+            // we reconnect mpv to get back to the live, like the Twitch site does.
             self.launch_mpv();
         } else if self.session.as_ref().is_some_and(|s| s.mpv.is_some()) {
             self.mpv_command(json!(["set", "pause", "yes"]));
@@ -482,7 +482,7 @@ impl EvolveApp {
     // ---------- Interface ----------
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        // Pas de raccourci pendant la saisie de texte (champ du chat, à l'étape 2).
+        // No shortcut while typing text (chat field, at step 2).
         if ctx.egui_wants_keyboard_input() {
             return;
         }
@@ -499,7 +499,7 @@ impl EvolveApp {
         if pressed(Key::ArrowDown) {
             self.mpv_command(json!(["add", "volume", -5]));
         }
-        // Échap sort d'abord du mode le plus « immersif ».
+        // Escape leaves the most "immersive" mode first.
         let escape = pressed(Key::Escape);
         if pressed(Key::F) || (escape && self.fullscreen) {
             self.toggle_fullscreen();
@@ -510,7 +510,7 @@ impl EvolveApp {
         }
     }
 
-    /// Barre du haut : chaîne, profil, état.
+    /// Top bar: channel, profile, state.
     fn controls_ui(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -557,7 +557,7 @@ impl EvolveApp {
             .on_hover_text("Qualité de la vidéo");
         let offline = self.available.is_empty();
         let mut choice = None;
-        // La barre étant en bas de la fenêtre, le menu s'ouvre toujours vers le haut.
+        // The bar being at the bottom of the window, the menu always opens upwards.
         egui::Popup::menu(&button)
             .align(egui::RectAlign::TOP_START)
             .show(|ui| {
@@ -594,7 +594,7 @@ impl EvolveApp {
         }
     }
 
-    /// Barre de contrôles sous la vidéo.
+    /// Controls bar under the video.
     fn player_bar_ui(&mut self, ui: &mut egui::Ui) {
         let big = |glyph: &str| style::icon(glyph).size(18.0);
         let playing = self.session.as_ref().is_some_and(|s| s.mpv.is_some());
@@ -646,7 +646,7 @@ impl EvolveApp {
                 .add(egui::Slider::new(&mut volume, 0..=100).show_value(false))
                 .on_hover_text(format!("Volume : {volume} % (flèches haut / bas)"));
             if slider.changed() {
-                // Sans vidéo en cours, le volume sera appliqué au prochain lancement.
+                // Without a video running, the volume will be applied at the next launch.
                 self.mpv_command(json!(["set_property", "volume", volume]));
                 self.config.player.volume = volume;
                 self.config_dirty = true;
@@ -770,12 +770,12 @@ impl EvolveApp {
         ui.painter().rect_filled(rect, 0.0, Color32::BLACK);
         let embedded = !self.detached && self.session.as_ref().is_some_and(|s| s.mpv.is_some());
 
-        // egui ne peut rien dessiner par-dessus la fenêtre X11 de mpv : un menu ouvert
-        // (profil, qualité…) serait caché. On masque la vidéo le temps du choix (le son continue).
+        // egui cannot draw anything over mpv's X11 window: an open menu
+        // (profile, quality…) would be hidden. The video is hidden during the choice (the sound continues).
         let menu_open = egui::Popup::is_any_open(ui.ctx());
         if let Some(surface) = &mut self.surface {
             let result = if embedded && !menu_open {
-                // egui compte en « points », X11 en pixels réels (différents si l'écran est zoomé).
+                // egui counts in "points", X11 in real pixels (different if the screen is zoomed).
                 let ppp = ui.ctx().pixels_per_point();
                 let px = |v: f32| (v * ppp).round();
                 surface.show_at(
@@ -833,7 +833,7 @@ impl eframe::App for EvolveApp {
             self.save_config();
         }
         if self.session.is_some() {
-            // Revérifie l'état des processus deux fois par seconde.
+            // Checks the state of the processes again twice a second.
             ctx.request_repaint_after(Duration::from_millis(500));
         }
     }
@@ -850,7 +850,7 @@ impl eframe::App for EvolveApp {
                 .default_size(340.0)
                 .min_size(220.0)
                 .show(ui, |ui| self.chat.ui(ui));
-            // Ajoutée après le chat : elle n'occupe que la largeur de la vidéo.
+            // Added after the chat: it only takes the width of the video.
             egui::Panel::bottom("barre_lecteur").show(ui, |ui| self.player_bar_ui(ui));
         }
         egui::CentralPanel::no_frame().show(ui, |ui| self.video_ui(ui));
@@ -862,7 +862,7 @@ impl eframe::App for EvolveApp {
     }
 }
 
-/// Crée la fenêtre X11 enfant qui accueillera la vidéo, dans la fenêtre de l'application.
+/// Creates the child X11 window that will host the video, inside the application's window.
 fn create_surface(cc: &eframe::CreationContext<'_>) -> Result<VideoSurface, String> {
     let handle = cc.window_handle().map_err(|e| e.to_string())?;
     let parent = match handle.as_raw() {
@@ -873,9 +873,9 @@ fn create_surface(cc: &eframe::CreationContext<'_>) -> Result<VideoSurface, Stri
     VideoSurface::new(parent)
 }
 
-/// Vrai si notre propre fenêtre est dessinée par le pilote OpenGL NVIDIA : le bureau
-/// tourne alors sur la NVIDIA, et mpv peut se limiter à ce pilote. On le lit dans la
-/// liste des bibliothèques chargées par notre processus (`/proc/self/maps`).
+/// True if our own window is drawn by the NVIDIA OpenGL driver: the desktop
+/// then runs on the NVIDIA, and mpv can limit itself to that driver. It is read from the
+/// list of libraries loaded by our process (`/proc/self/maps`).
 fn display_uses_nvidia() -> bool {
     Path::new(mpv::NVIDIA_EGL_VENDOR).exists()
         && fs::read_to_string("/proc/self/maps")

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Installe Evolve TV pour l'utilisateur courant (sans sudo) :
-#   ~/.local/bin/evolve-tv                     le programme
-#   ~/.local/share/evolve-tv/icon.png          l'icône (hors dépôt git : droits de l'auteur)
-#   ~/.local/share/applications/evolve-tv.desktop   le lanceur du menu Cinnamon
+# Installs Evolve TV for the current user (without sudo):
+#   ~/.local/bin/evolve-tv                     the program
+#   ~/.local/share/evolve-tv/icon.png          the icon (kept out of the git repository: the author's rights)
+#   ~/.local/share/applications/evolve-tv.desktop   the Cinnamon menu launcher
 #
-# Usage : ./scripts/installer.sh   (depuis la racine du projet, après cargo build --release)
+# Usage: ./scripts/installer.sh   (from the project root, after cargo build --release)
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,7 +18,7 @@ apps_dir="$HOME/.local/share/applications"
 
 mkdir -p "$bin_dir" "$data_dir" "$apps_dir"
 
-# Remplacement atomique : sans effet sur une instance déjà lancée.
+# Atomic replacement: no effect on an instance that is already running.
 cp "$binary" "$bin_dir/.evolve-tv.new"
 chmod 755 "$bin_dir/.evolve-tv.new"
 mv -f "$bin_dir/.evolve-tv.new" "$bin_dir/evolve-tv"
