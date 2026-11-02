@@ -91,6 +91,8 @@ pub struct ChatColumn {
     auto_join_changed: bool,
     /// IDs of the announcements already answered (avoids sending twice).
     joined_raffles: VecDeque<String>,
+    /// Moments where « !join » must be sent (5 s after each announcement).
+    pending_joins: VecDeque<Instant>,
 
     panel: ChatPanel,
     images: ImageCache,
@@ -128,6 +130,7 @@ impl ChatColumn {
             auto_join: config.auto_join_raffles,
             auto_join_changed: false,
             joined_raffles: VecDeque::new(),
+            pending_joins: VecDeque::new(),
             panel,
             images: ImageCache::new(ctx),
         };
@@ -157,8 +160,12 @@ impl ChatColumn {
         let Some(announcement) = raffle::parse(&message.text) else {
             return;
         };
-        // Too late: under 3 seconds left, the entry would not arrive in time.
-        if announcement.seconds_left.is_some_and(|s| s < 3) {
+        // Only « !join » is ever sent, and only when the announcement asks for it.
+        if announcement.keyword != raffle::JOIN_KEYWORD {
+            return;
+        }
+        // Sent 5 s after the announcement: if the countdown ends before that, skip it.
+        if announcement.seconds_left <= raffle::DELAY_SECS {
             return;
         }
         // An announcement without an ID cannot be recognised: we do not answer it.
@@ -169,12 +176,26 @@ impl ChatColumn {
         if self.joined_raffles.len() > 50 {
             self.joined_raffles.pop_front();
         }
+        self.pending_joins
+            .push_back(Instant::now() + Duration::from_secs(raffle::DELAY_SECS.into()));
         self.panel.push_system(format!(
-            "Raffle detected: sending {} (automatic participation)",
-            announcement.keyword
+            "Raffle detected: {} will be sent in {} s",
+            raffle::JOIN_KEYWORD,
+            raffle::DELAY_SECS
         ));
-        if let Some((_, chat)) = &self.chat {
-            chat.send(&announcement.keyword, None);
+    }
+
+    /// Sends the « !join » whose delay has elapsed (called every frame).
+    fn send_due_joins(&mut self) {
+        let now = Instant::now();
+        while self.pending_joins.front().is_some_and(|due| *due <= now) {
+            self.pending_joins.pop_front();
+            if !self.auto_join || !matches!(self.auth, AuthState::LoggedIn(_)) {
+                continue;
+            }
+            if let Some((_, chat)) = &self.chat {
+                chat.send(raffle::JOIN_KEYWORD, None);
+            }
         }
     }
 
@@ -218,6 +239,12 @@ impl ChatColumn {
             self.handle(msg);
         }
         self.images.poll();
+        self.send_due_joins();
+        // Keep the frames coming until the next « !join » is due.
+        if let Some(next) = self.pending_joins.front() {
+            let wait = next.saturating_duration_since(Instant::now());
+            self.ctx.request_repaint_after(wait);
+        }
 
         if Instant::now() >= self.next_check {
             self.next_check = Instant::now() + CHECK_INTERVAL;
@@ -498,27 +525,6 @@ impl ChatColumn {
                 self.header_open = !self.header_open;
             }
             ui.label(RichText::new(format!("Chat de {}", self.channel)).strong());
-            let logged_in = matches!(self.auth, AuthState::LoggedIn(_));
-            let mut auto_join = self.auto_join;
-            let checkbox = ui
-                .add_enabled(
-                    logged_in,
-                    egui::Checkbox::new(&mut auto_join, "Raffles auto"),
-                )
-                .on_hover_text(
-                    "Sends \"!join\" automatically for each DollexBot raffle.\n\
-                     It sends messages with your account without you acting: a risk\n\
-                     for your account (see the README). Off by default.",
-                );
-            if checkbox.changed() {
-                self.auto_join = auto_join;
-                self.auto_join_changed = true;
-                self.panel.push_system(if auto_join {
-                    "Automatic raffle participation: on"
-                } else {
-                    "Automatic raffle participation: off"
-                });
-            }
             if !open && let AuthState::LoggedIn(session) = &self.auth {
                 ui.label(RichText::new(&session.identity.login).small().weak());
             }
@@ -526,6 +532,30 @@ impl ChatColumn {
         let mut action = None;
         if open {
             action = self.account_ui(ui);
+            let logged_in = matches!(self.auth, AuthState::LoggedIn(_));
+            let state = if self.auto_join { "actif" } else { "inactif" };
+            let toggle = ui
+                .add_enabled(
+                    logged_in,
+                    egui::Button::new(format!("Auto join raffles : {state}")),
+                )
+                .on_hover_text(
+                    "Sends \"!join\" 5 s after each DollexBot raffle announcement.\n\
+                     It sends messages with your account without you acting: a risk\n\
+                     for your account (see the README). Off by default.",
+                );
+            if toggle.clicked() {
+                self.auto_join = !self.auto_join;
+                self.auto_join_changed = true;
+                if !self.auto_join {
+                    self.pending_joins.clear();
+                }
+                self.panel.push_system(if self.auto_join {
+                    "Auto join raffles: on"
+                } else {
+                    "Auto join raffles: off"
+                });
+            }
             if ui
                 .small_button(style::icon_label(
                     icon::ARROW_CLOCKWISE,

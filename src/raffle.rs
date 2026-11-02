@@ -8,19 +8,27 @@
 /// Identifiant de connexion du bot (en minuscules). C'est l'identifiant, et non le
 /// nom affiché, qui fait foi : un spectateur ne peut pas le falsifier.
 pub const BOT_LOGIN: &str = "dollexbot";
+/// The only message the application ever sends for a raffle.
+pub const JOIN_KEYWORD: &str = "!join";
+/// Delay between the announcement and the « !join », in seconds.
+pub const DELAY_SECS: u32 = 5;
 
 /// Une raffle annoncée.
 #[derive(Debug, PartialEq)]
 pub struct Raffle {
-    /// Mot à envoyer pour participer, par exemple `!join`.
+    /// Keyword announced to take part, for example `!join`.
     pub keyword: String,
-    /// Secondes restantes d'après l'annonce, si elle les indique.
-    pub seconds_left: Option<u32>,
+    /// Seconds left according to the announcement.
+    pub seconds_left: u32,
 }
 
 /// Lit une annonce de raffle. `None` si le texte n'en est pas une.
+///
+/// Seule l'annonce avec compte à rebours est reconnue (« … secondes restantes … »).
+/// Les autres messages du bot (gagnants, fin de raffle, etc.) sont ignorés.
 pub fn parse(text: &str) -> Option<Raffle> {
-    if !text.to_lowercase().contains("raffle") {
+    let lower = text.to_lowercase();
+    if !lower.contains("raffle") || !lower.contains("restante") {
         return None;
     }
     let keyword = text
@@ -34,7 +42,7 @@ pub fn parse(text: &str) -> Option<Raffle> {
         })?;
     Some(Raffle {
         keyword,
-        seconds_left: seconds_left(text),
+        seconds_left: seconds_left(text)?,
     })
 }
 
@@ -58,7 +66,7 @@ mod tests {
     fn annonce_de_raffle() {
         let raffle = parse("Raffle pour 777 DOLLEX ! 20 secondes restantes. Go \"!join\"").unwrap();
         assert_eq!(raffle.keyword, "!join");
-        assert_eq!(raffle.seconds_left, Some(20));
+        assert_eq!(raffle.seconds_left, 20);
     }
 
     #[test]
@@ -74,18 +82,22 @@ mod tests {
     fn refuse_les_mots_cles_dangereux() {
         // Seul le mot-clé est envoyé, jamais le reste du texte : « --help » est ignoré.
         assert_eq!(
-            parse("Raffle ! Go \"!join --help\"").unwrap().keyword,
+            parse("Raffle ! 20 secondes restantes. Go \"!join --help\"")
+                .unwrap()
+                .keyword,
             "!join"
         );
         // Un mot-clé avec un symbole ou trop long n'est pas reconnu.
-        assert!(parse("Raffle ! Go \"!jo;in\"").is_none());
-        let long = format!("Raffle ! Go \"!{}\"", "a".repeat(21));
+        assert!(parse("Raffle ! 20 secondes restantes. Go \"!jo;in\"").is_none());
+        let long = format!("Raffle ! 20 secondes restantes. Go \"!{}\"", "a".repeat(21));
         assert!(parse(&long).is_none());
     }
 
     #[test]
-    fn sans_compte_a_rebours() {
-        let raffle = parse("Raffle pour 1111 BOOSTEX ! Go \"!join\"").unwrap();
-        assert_eq!(raffle.seconds_left, None);
+    fn autres_messages_du_bot_ignores() {
+        // Fin de raffle et gagnants : pas de compte à rebours, donc aucune réponse.
+        assert!(parse("Raffle terminée ! Le gagnant est @someone, félicitations").is_none());
+        assert!(parse("@someone a gagné 777 DOLLEX à la raffle, bravo !").is_none());
+        assert!(parse("Raffle pour 1111 BOOSTEX ! Go \"!join\"").is_none());
     }
 }

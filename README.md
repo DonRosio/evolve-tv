@@ -65,16 +65,17 @@ copy the nickname, reply. Links open after a confirmation (the real domain is di
 
 ### Automatic raffles (off by default)
 
-A **"Raffles auto"** checkbox in the chat header sends `!join` (or the keyword announced)
-for each DollexBot raffle, without you acting. Only the keyword is sent, never the text
-of the announcement. The bot is recognised by its **login identifier** (`dollexbot`), not
-by its display name, so a viewer cannot impersonate it. Every action appears in the chat
-("Raffle detected: sending !join").
+In the collapsible **"Chat de …"** section, the button **"Auto join raffles : actif / inactif"**
+switches the feature on or off. When it is on, the application sends **`!join`** (and nothing
+else) **5 seconds after** each DollexBot raffle announcement. Only the announcement with its
+countdown is recognised ("… 20 secondes restantes … Go "!join""): the other DollexBot messages
+(winners, end of raffle) are ignored, and so is any raffle asking for another keyword. The bot is
+recognised by its **login identifier** (`dollexbot`), not by its display name. Each action appears
+in the chat ("Raffle detected: !join will be sent in 5 s").
 
 **Risk**: this option sends messages with **your account**, without you triggering them.
 Twitch or the channel may consider it automation, and your account may be suspended.
-Twitch's sending limit (20 messages / 30 s) also applies. Enable it only if you accept
-this risk.
+Twitch's sending limit (20 messages / 30 s) also applies. Enable it only if you accept this risk.
 
 ### Shortcuts (bar under the input)
 
