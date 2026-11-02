@@ -20,6 +20,7 @@ mod irc;
 mod mpv;
 mod network;
 mod paths;
+mod raffle;
 mod streamlink;
 mod style;
 mod video_surface;

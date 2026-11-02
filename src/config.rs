@@ -37,6 +37,9 @@ pub struct Config {
     pub saved_messages: Vec<SavedMessage>,
     /// Names of the favourite emotes (bar under the chat input).
     pub favorite_emotes: Vec<String>,
+    /// Participation automatique aux raffles de DollexBot. Désactivée par défaut :
+    /// elle envoie des messages avec ton compte, sans que tu agisses (voir le README).
+    pub auto_join_raffles: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -126,6 +129,7 @@ impl Default for Config {
                 },
             ],
             favorite_emotes: Vec::new(),
+            auto_join_raffles: false,
         }
     }
 }

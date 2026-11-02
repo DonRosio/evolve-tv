@@ -3,7 +3,7 @@
 //! It orchestrates the background threads (token check, login by code,
 //! IRC chat, Twitch API) and receives their results through a channel, like `app.rs`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -15,12 +15,14 @@ use egui_phosphor::regular as icon;
 
 use crate::auth::{self, Outcome, Poll, Session};
 use crate::browser;
+use crate::chat::ChatMessage;
 use crate::chat::{Badge, Chat, ChatEvent, ChatLogin, SharedLogin};
 use crate::chat_panel::ChatPanel;
 use crate::config::{Config, SavedMessage};
 use crate::emotes;
 use crate::helix::{self, BadgeImage};
 use crate::images::ImageCache;
+use crate::raffle;
 use crate::style;
 
 /// Twitch asks for the token to be checked again every hour.
@@ -83,6 +85,12 @@ pub struct ChatColumn {
     emotes_loaded: Option<(String, Instant)>,
     /// Account header expanded (collapsed by default to leave room for the chat).
     header_open: bool,
+    /// Automatic participation in raffles (checkbox).
+    auto_join: bool,
+    /// Value changed from the interface, to be saved in the config.
+    auto_join_changed: bool,
+    /// IDs of the announcements already answered (avoids sending twice).
+    joined_raffles: VecDeque<String>,
 
     panel: ChatPanel,
     images: ImageCache,
@@ -117,6 +125,9 @@ impl ChatColumn {
             badges_for: None,
             emotes_loaded: None,
             header_open: false,
+            auto_join: config.auto_join_raffles,
+            auto_join_changed: false,
+            joined_raffles: VecDeque::new(),
             panel,
             images: ImageCache::new(ctx),
         };
@@ -126,6 +137,45 @@ impl ChatColumn {
             None => column.restart_chat(),
         }
         column
+    }
+
+    /// Automatic participation changed from the interface (to be saved).
+    pub fn take_auto_join_change(&mut self) -> Option<bool> {
+        std::mem::take(&mut self.auto_join_changed).then_some(self.auto_join)
+    }
+
+    /// Sends the keyword (e.g. `!join`) when the bot announces a raffle, if the option is
+    /// enabled. Only the keyword is sent, never the text of the announcement.
+    fn maybe_join_raffle(&mut self, message: &ChatMessage) {
+        if !self.auto_join
+            || message.own
+            || message.login != raffle::BOT_LOGIN
+            || !matches!(self.auth, AuthState::LoggedIn(_))
+        {
+            return;
+        }
+        let Some(announcement) = raffle::parse(&message.text) else {
+            return;
+        };
+        // Too late: under 3 seconds left, the entry would not arrive in time.
+        if announcement.seconds_left.is_some_and(|s| s < 3) {
+            return;
+        }
+        // An announcement without an ID cannot be recognised: we do not answer it.
+        if message.id.is_empty() || self.joined_raffles.contains(&message.id) {
+            return;
+        }
+        self.joined_raffles.push_back(message.id.clone());
+        if self.joined_raffles.len() > 50 {
+            self.joined_raffles.pop_front();
+        }
+        self.panel.push_system(format!(
+            "Raffle detected: sending {} (automatic participation)",
+            announcement.keyword
+        ));
+        if let Some((_, chat)) = &self.chat {
+            chat.send(&announcement.keyword, None);
+        }
     }
 
     /// Saved messages and favourites modified from the interface (to be saved).
@@ -328,7 +378,10 @@ impl ChatColumn {
                 self.panel
                     .push_system(format!("Chat déconnecté ({reason}), reconnexion…"));
             }
-            ChatEvent::Message(message) => self.panel.push_message(message),
+            ChatEvent::Message(message) => {
+                self.maybe_join_raffle(&message);
+                self.panel.push_message(message);
+            }
             ChatEvent::Notice(text) => self.panel.push_system(text),
             ChatEvent::SendRejected(reason) => self.panel.push_system(format!("⚠ {reason}")),
             ChatEvent::Clear(target) => self.panel.clear(target),
@@ -445,6 +498,27 @@ impl ChatColumn {
                 self.header_open = !self.header_open;
             }
             ui.label(RichText::new(format!("Chat de {}", self.channel)).strong());
+            let logged_in = matches!(self.auth, AuthState::LoggedIn(_));
+            let mut auto_join = self.auto_join;
+            let checkbox = ui
+                .add_enabled(
+                    logged_in,
+                    egui::Checkbox::new(&mut auto_join, "Raffles auto"),
+                )
+                .on_hover_text(
+                    "Sends \"!join\" automatically for each DollexBot raffle.\n\
+                     It sends messages with your account without you acting: a risk\n\
+                     for your account (see the README). Off by default.",
+                );
+            if checkbox.changed() {
+                self.auto_join = auto_join;
+                self.auto_join_changed = true;
+                self.panel.push_system(if auto_join {
+                    "Automatic raffle participation: on"
+                } else {
+                    "Automatic raffle participation: off"
+                });
+            }
             if !open && let AuthState::LoggedIn(session) = &self.auth {
                 ui.label(RichText::new(&session.identity.login).small().weak());
             }

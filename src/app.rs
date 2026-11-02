@@ -826,6 +826,11 @@ impl eframe::App for EvolveApp {
         }
         self.poll_processes();
         self.chat.logic();
+        if let Some(auto_join) = self.chat.take_auto_join_change() {
+            self.config.auto_join_raffles = auto_join;
+            self.config_dirty = true;
+            self.save_config();
+        }
         if let Some((saved_messages, favorites)) = self.chat.take_shortcuts_change() {
             self.config.saved_messages = saved_messages;
             self.config.favorite_emotes = favorites;
