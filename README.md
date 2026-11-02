@@ -63,6 +63,19 @@ Hovering a message shows **Copy** and **Reply** (a real Twitch reply, linked to 
 message), in a reserved margin that never hides the text. Right click on a message: copy the message,
 copy the nickname, reply. Links open after a confirmation (the real domain is displayed).
 
+### Automatic raffles (off by default)
+
+A **"Raffles auto"** checkbox in the chat header sends `!join` (or the keyword announced)
+for each DollexBot raffle, without you acting. Only the keyword is sent, never the text
+of the announcement. The bot is recognised by its **login identifier** (`dollexbot`), not
+by its display name, so a viewer cannot impersonate it. Every action appears in the chat
+("Raffle detected: sending !join").
+
+**Risk**: this option sends messages with **your account**, without you triggering them.
+Twitch or the channel may consider it automation, and your account may be suspended.
+Twitch's sending limit (20 messages / 30 s) also applies. Enable it only if you accept
+this risk.
+
 ### Shortcuts (bar under the input)
 
 - **Saved messages**: a click sends the message. Right click: insert it in the input or delete the
