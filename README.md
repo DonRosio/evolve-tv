@@ -67,7 +67,7 @@ copy the nickname, reply. Links open after a confirmation (the real domain is di
 
 In the collapsible **"Chat de …"** section, the button **"Auto join raffles : actif / inactif"**
 switches the feature on or off. When it is on, the application sends **`!join`** (and nothing
-else) **5 seconds after** each DollexBot raffle announcement. Only the announcement with its
+else) **2 seconds after** each DollexBot raffle announcement. Only the announcement with its
 countdown is recognised ("… 20 secondes restantes … Go "!join""): the other DollexBot messages
 (winners, end of raffle) are ignored, and so is any raffle asking for another keyword. The bot is
 recognised by its **login identifier** (`dollexbot`), not by its display name. Each action appears

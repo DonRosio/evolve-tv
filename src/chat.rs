@@ -110,6 +110,21 @@ pub struct Chat {
     stop: Arc<AtomicBool>,
 }
 
+/// Cheap, clonable handle to send a message from any thread (for timed sends).
+#[derive(Clone)]
+pub struct ChatSender {
+    commands: Sender<Command>,
+}
+
+impl ChatSender {
+    pub fn send(&self, text: &str) {
+        let _ = self.commands.send(Command::Send {
+            text: text.to_owned(),
+            reply_to: None,
+        });
+    }
+}
+
 impl Chat {
     pub fn spawn(
         channel: String,
@@ -121,6 +136,12 @@ impl Chat {
         let stop_thread = stop.clone();
         thread::spawn(move || run(&channel, &login, &receiver, &stop_thread, &on_event));
         Chat { commands, stop }
+    }
+
+    pub fn sender(&self) -> ChatSender {
+        ChatSender {
+            commands: self.commands.clone(),
+        }
     }
 
     pub fn send(&self, text: &str, reply_to: Option<ReplyTarget>) {

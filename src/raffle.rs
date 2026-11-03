@@ -11,7 +11,7 @@ pub const BOT_LOGIN: &str = "dollexbot";
 /// The only message the application ever sends for a raffle.
 pub const JOIN_KEYWORD: &str = "!join";
 /// Delay between the announcement and the « !join », in seconds.
-pub const DELAY_SECS: u32 = 5;
+pub const DELAY_SECS: u32 = 2;
 
 /// Une raffle annoncée.
 #[derive(Debug, PartialEq)]

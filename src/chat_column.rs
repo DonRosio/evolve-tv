@@ -91,8 +91,8 @@ pub struct ChatColumn {
     auto_join_changed: bool,
     /// IDs of the announcements already answered (avoids sending twice).
     joined_raffles: VecDeque<String>,
-    /// Moments where « !join » must be sent (5 s after each announcement).
-    pending_joins: VecDeque<Instant>,
+    /// Shared with the timers that send « !join » (they check it before sending).
+    auto_join_flag: Arc<AtomicBool>,
 
     panel: ChatPanel,
     images: ImageCache,
@@ -130,7 +130,7 @@ impl ChatColumn {
             auto_join: config.auto_join_raffles,
             auto_join_changed: false,
             joined_raffles: VecDeque::new(),
-            pending_joins: VecDeque::new(),
+            auto_join_flag: Arc::new(AtomicBool::new(config.auto_join_raffles)),
             panel,
             images: ImageCache::new(ctx),
         };
@@ -164,7 +164,7 @@ impl ChatColumn {
         if announcement.keyword != raffle::JOIN_KEYWORD {
             return;
         }
-        // Sent 5 s after the announcement: if the countdown ends before that, skip it.
+        // Sent 2 s after the announcement: if the countdown ends before that, skip it.
         if announcement.seconds_left <= raffle::DELAY_SECS {
             return;
         }
@@ -176,26 +176,22 @@ impl ChatColumn {
         if self.joined_raffles.len() > 50 {
             self.joined_raffles.pop_front();
         }
-        self.pending_joins
-            .push_back(Instant::now() + Duration::from_secs(raffle::DELAY_SECS.into()));
         self.panel.push_system(format!(
             "Raffle detected: {} will be sent in {} s",
             raffle::JOIN_KEYWORD,
             raffle::DELAY_SECS
         ));
-    }
-
-    /// Sends the « !join » whose delay has elapsed (called every frame).
-    fn send_due_joins(&mut self) {
-        let now = Instant::now();
-        while self.pending_joins.front().is_some_and(|due| *due <= now) {
-            self.pending_joins.pop_front();
-            if !self.auto_join || !matches!(self.auth, AuthState::LoggedIn(_)) {
-                continue;
-            }
-            if let Some((_, chat)) = &self.chat {
-                chat.send(raffle::JOIN_KEYWORD, None);
-            }
+        // A timer thread sends it: it does not depend on how often the window redraws.
+        if let Some((_, chat)) = &self.chat {
+            let sender = chat.sender();
+            let enabled = Arc::clone(&self.auto_join_flag);
+            thread::spawn(move || {
+                thread::sleep(Duration::from_secs(raffle::DELAY_SECS.into()));
+                // Re-checked at send time: switching the option off cancels the send.
+                if enabled.load(Ordering::Relaxed) {
+                    sender.send(raffle::JOIN_KEYWORD);
+                }
+            });
         }
     }
 
@@ -239,12 +235,6 @@ impl ChatColumn {
             self.handle(msg);
         }
         self.images.poll();
-        self.send_due_joins();
-        // Keep the frames coming until the next « !join » is due.
-        if let Some(next) = self.pending_joins.front() {
-            let wait = next.saturating_duration_since(Instant::now());
-            self.ctx.request_repaint_after(wait);
-        }
 
         if Instant::now() >= self.next_check {
             self.next_check = Instant::now() + CHECK_INTERVAL;
@@ -547,9 +537,7 @@ impl ChatColumn {
             if toggle.clicked() {
                 self.auto_join = !self.auto_join;
                 self.auto_join_changed = true;
-                if !self.auto_join {
-                    self.pending_joins.clear();
-                }
+                self.auto_join_flag.store(self.auto_join, Ordering::Relaxed);
                 self.panel.push_system(if self.auto_join {
                     "Auto join raffles: on"
                 } else {
