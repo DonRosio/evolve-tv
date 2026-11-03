@@ -71,7 +71,7 @@ else) **2 seconds after** each DollexBot raffle announcement. Only the announcem
 countdown is recognised ("… 20 secondes restantes … Go "!join""): the other DollexBot messages
 (winners, end of raffle) are ignored, and so is any raffle asking for another keyword. The bot is
 recognised by its **login identifier** (`dollexbot`), not by its display name. Each action appears
-in the chat ("Raffle detected: !join will be sent in 5 s").
+in the chat ("Raffle detected: !join will be sent in 2 s").
 
 **Risk**: this option sends messages with **your account**, without you triggering them.
 Twitch or the channel may consider it automation, and your account may be suspended.
